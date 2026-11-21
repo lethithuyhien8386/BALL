@@ -156,7 +156,9 @@ public final class GameSolver {
         final int w,h;
         final double topY,oddX,colPitch,rowPitch,radiusX;
         final boolean narrowTop;
-        SavedLayout(int w,int h,Configuration c) {
+        final int previousCount;
+        SavedLayout(int w,int h,Configuration c,int count) {
+            previousCount=count;
             this.w=w;this.h=h;topY=c.topY;oddX=c.oddX;
             colPitch=c.colPitch;rowPitch=c.rowPitch;radiusX=c.radiusX;
             narrowTop=c.narrowTop;
@@ -464,16 +466,23 @@ public final class GameSolver {
             this.x=x;this.y=y;this.color=color;this.confidence=confidence;
         }
     }
-    private static LauncherBall findLauncher(int[] pixels,int w,int h,Configuration cfg) {
+    private static LauncherBall findLauncher(int[] pixels,int w,int h,Configuration cfg,
+                                             Ball[][] visibleGrid) {
         double r=w*cfg.radiusX;
         // The video shows the loaded ball 20-30px ABOVE the old launchY.
         // Search the narrow central gun channel, ignoring the next-ball slot
         // to the right and the blue dragon sprite below the actual launcher.
         double cx=w*cfg.launchX;
         LauncherBall best=null;double qualityBest=-1;
-        int x0=(int)Math.max(r,cx-r*.45),x1=(int)Math.min(w-r,cx+r*.45);
-        boolean narrowArena=cfg.detectedArena && (cfg.boardRight-cfg.boardLeft)<.79;
-        int y0=(int)(h*.700),y1=(int)(h*(narrowArena?.748:.790));
+        int[] colorCount=new int[128];
+        for(Ball[] row:visibleGrid)for(Ball ball:row)
+            if(ball!=null && ball.color<128)colorCount[ball.color]++;
+        // The cannon rotates: the *loaded* projectile may sit 1-2 radii
+        // left/right of the dragon's center. The previous +/-0.45 radius
+        // corridor missed those frames and picked cyan parts of the sprite.
+        // The next-ball preview is lower-right; do not search that region.
+        int x0=(int)Math.max(r,cx-r*2.15),x1=(int)Math.min(w-r,cx+r*2.15);
+        int y0=(int)(h*.705),y1=(int)(h*.775);
         for(int y=y0;y<=y1;y+=2)for(int x=x0;x<=x1;x+=2) {
             char color=patchColor(pixels,w,h,x,y,r);
             if(color==' ' || color=='W')continue;
@@ -486,9 +495,14 @@ public final class GameSolver {
             int circular=circularQuality(pixels,w,h,x,y,r);
             if(match<9 || circular<6)continue;
             // Prefer the upper loaded ball, not the multicolor dragon's face.
+            // Strongly prefer the actual round projectile in the upper
+            // launcher ring, not the character's cyan neck below. The top
+            // sphere may move sideways when the cannon points left/right.
             double q=match*1.3+circular*1.1-second*.7
-                    -Math.abs(x-w*.50)*.09
-                    -Math.abs(y-h*.738)*.012;
+                    -Math.abs(x-w*.50)*.025
+                    -Math.abs(y-h*.742)*.040;
+            if(colorCount[color]>0)q+=3.5;
+            else if(color=='B')q-=2.0; // animated blue cannon neck
             if(q>qualityBest) {
                 qualityBest=q;
                 best=new LauncherBall(x,y,color,
@@ -544,7 +558,7 @@ public final class GameSolver {
                 found[row][col]=new Ball(row,col,b.color,b.x,b.y,exposed);
             }
         }
-        LauncherBall launcher=findLauncher(pixels,w,h,c);
+        LauncherBall launcher=findLauncher(pixels,w,h,c,found);
         char shooter=launcher==null?' ':launcher.color;
         // Never mistake the dragon's cyan body for a loaded blue ball when
         // the entire visible board has no blue bubbles.
@@ -552,7 +566,11 @@ public final class GameSolver {
             int same=0;
             for(Ball[] line:found)for(Ball b:line)
                 if(b!=null && b.color==shooter)same++;
-            if(same==0) {shooter=' ';launcher=null;}
+            // An unmatched color is a legitimate next ball, especially in
+            // sparse boards. Do not erase it; the planner will use a setup or
+            // advance shot. Circular + launcher-position checks protect from
+            // the dragon/preview being recognized as a loaded projectile.
+            if(same==0 && launcher.confidence<.92) {shooter=' ';launcher=null;}
         }
         hash^=shooter;hash*=0x100000001b3L;
         return new Board(w,h,measured,found,shooter,count,hash,
@@ -581,7 +599,9 @@ public final class GameSolver {
         }
         // Refit if the HUD/grid moved, or if no longer detecting a useful board.
         // Retain the last good calibration for sparse endgame boards.
-        if(result==null || result.count<3) {
+        if(result==null || result.count<9 ||
+                (previous!=null && result.count<previous.previousCount*.85 &&
+                 previous.previousCount>=22)) {
             Configuration found=findLayout(pixels,w,h,cfg);
             if(found!=null) {
                 Board candidate=detectAt(pixels,w,h,found);
@@ -591,13 +611,18 @@ public final class GameSolver {
             }
         }
         if(result==null || result.count<1) {diagnosis="KHÔNG THẤY LƯỚI";return null;}
+        // A few isolated detected circles far below the ceiling indicate
+        // a shifted lattice or a mid-transition frame, not a playable board.
+        if(result.count<7 && result.ceilingRow>1) {
+            diagnosis="ĐANG CẬP NHẬT LƯỚI";return null;
+        }
         if(result.shooter==' ') {diagnosis="CHƯA CÓ BÓNG SẴN SÀNG";return null;}
         if(result.shooter=='W') {diagnosis="BÓNG ĐẶC BIỆT";return null;}
         if(result.shooterConfidence<.80) {
             diagnosis="MÀU BÓNG CHƯA CHẮC";return null;
         }
         diagnosis="OK "+result.count+" BÓNG "+result.shooter;
-        if(calibrated!=null && result.count>=3)savedLayout=new SavedLayout(w,h,calibrated);
+        if(calibrated!=null && result.count>=3)savedLayout=new SavedLayout(w,h,calibrated,result.count);
         return result;
     }
 
@@ -776,9 +801,14 @@ public final class GameSolver {
             }
             return new Score(matched*110+dropped*170+visible*.10+dropPixels*.10,matched,dropped);
         }
-        // If no cluster pops, prepare a future combo but avoid low hanging bubbles.
+        // A zero-pop shot still advances the game. Prefer a setup that touches
+        // the most already-connected same-color bubbles; avoid attaching low
+        // where it would endanger the board. No random fallback direction.
         int same=matching.size()-1;
-        return new Score(same*20 - p.row*1.7 - 18,0,0);
+        int depth=p.row-b.ceilingRow;
+        // Matching one neighbor puts the next same-colored shot one away from
+        // a 3-pop. The ordering is deliberately BELOW any genuine pop.
+        return new Score(same*65 - Math.max(0,depth)*2.0 - 38,0,0);
     }
     private static Shot shotAtAngle(Board b,List<Ball> all,double angle) {
         return shotAtAngle(b,all,angle,0,0);
@@ -837,8 +867,9 @@ public final class GameSolver {
         for(double offset:offsets) {
             Shot neighbor=shotAtAngle(b,balls,candidate.angle+offset);
             total++;
-            if(neighbor!=null && neighbor.snapRow==candidate.snapRow &&
-               neighbor.snapCol==candidate.snapCol)sameCell++;
+            if(neighbor!=null && (
+                    (neighbor.snapRow==candidate.snapRow && neighbor.snapCol==candidate.snapCol) ||
+                    (candidate.matched>=3 && neighbor.matched>=3)))sameCell++;
             double sample=neighbor==null?-75:neighbor.score;
             worst=Math.min(worst,sample);
         }
@@ -846,16 +877,18 @@ public final class GameSolver {
         if(candidate.bounces>0)for(double shift:new double[]{-2,2}) {
             Shot variant=shotAtAngle(b,balls,candidate.angle,shift,0);
             total++;
-            if(variant!=null && variant.snapRow==candidate.snapRow &&
-               variant.snapCol==candidate.snapCol)sameCell++;
+            if(variant!=null && (
+                    (variant.snapRow==candidate.snapRow && variant.snapCol==candidate.snapCol) ||
+                    (candidate.matched>=3 && variant.matched>=3)))sameCell++;
             worst=Math.min(worst,variant==null?-75:variant.score);
         }
         // Bubble radii can be slightly different from their image halo.
         for(double shift:new double[]{-.9,.9}) {
             Shot variant=shotAtAngle(b,balls,candidate.angle,0,shift);
             total++;
-            if(variant!=null && variant.snapRow==candidate.snapRow &&
-               variant.snapCol==candidate.snapCol)sameCell++;
+            if(variant!=null && (
+                    (variant.snapRow==candidate.snapRow && variant.snapCol==candidate.snapCol) ||
+                    (candidate.matched>=3 && variant.matched>=3)))sameCell++;
             worst=Math.min(worst,variant==null?-75:variant.score);
         }
         double confidence=sameCell/(double)Math.max(1,total);
@@ -893,7 +926,7 @@ public final class GameSolver {
         y=Math.max((int)(b.height*.10),Math.min(b.height-3,y));
         int key=x*65536+y;
         if(!used.add(key))return;
-        keepTop(finalists,shotAtAngle(b,all,angle),28);
+        keepTop(finalists,shotAtAngle(b,all,angle),96);
     }
     /**
      * Mirror each empty reachable cell across 1, 2, or 3 reflected wall
@@ -904,7 +937,7 @@ public final class GameSolver {
     public Shot bestShot(Board b) {
         if(b==null)return null;
         List<Ball> all=asList(b);
-        List<Shot> finalists=new ArrayList<>(28);
+        List<Shot> finalists=new ArrayList<>(96);
         Set<Integer> used=new HashSet<>();
         for(int a=-155;a<=155;a++)
             consider(b,all,a*.5,used,finalists);
@@ -938,15 +971,34 @@ public final class GameSolver {
         ArrayList<Shot> initial=new ArrayList<>(finalists);
         for(Shot shot:initial)for(double d:new double[]{-.30,-.15,.15,.30})
             consider(b,all,shot.angle+d,used,finalists);
-        Shot best=null;
+        Shot bestPop=null, bestAdvance=null;
+        // Rank both kinds of trajectories. An actual predicted pop outranks
+        // every setup/advance shot. Within the pop tier, reward the robust
+        // expected score instead of discarding an entire route at an arbitrary
+        // 80% snap-cell threshold. For setup shots require no precise target
+        // (other than connecting to the first collider) but prefer stability.
         for(Shot candidate:finalists) {
-            // Non-matching launches lose points in the actual game. Never
-            // choose a plausible-looking but non-popping random placement.
-            if(candidate.matched<3)continue;
             Shot ranked=stabilityRank(b,all,candidate);
-            if(ranked.reliability<.80)continue;
-            if(best==null || ranked.score>best.score)best=ranked;
+            if(candidate.matched>=3) {
+                // A path which holds under >= half of small aim perturbations
+                // is usable. Higher reliability still greatly improves rank.
+                if(ranked.reliability>=.50) {
+                    double value=ranked.score + ranked.reliability*38;
+                    if(bestPop==null || value>bestPop.score+bestPop.reliability*38)
+                        bestPop=ranked;
+                }
+            } else {
+                double value=ranked.score+ranked.reliability*12
+                        -(ranked.bounces*8);
+                if(bestAdvance==null || value>bestAdvance.score+
+                        bestAdvance.reliability*12-bestAdvance.bounces*8)
+                    bestAdvance=ranked;
+            }
         }
-        return best;
+        // Always fire once a genuine loaded projectile and a legal ray exist.
+        // A setup / advance shot may cost points; it is chosen ONLY when no
+        // credible pop is reachable. The caller must never turn null-pop into
+        // an idle state when bestAdvance exists.
+        return bestPop!=null?bestPop:bestAdvance;
     }
 }

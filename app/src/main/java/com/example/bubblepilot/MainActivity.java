@@ -47,7 +47,7 @@ public final class MainActivity extends Activity {
 
         TextView heading=text("BUBBLE PILOT",25,fg,true);
         content.addView(heading);
-        content.addView(text("v0.6.0 • Chỉ bắn khi có POP • Tự căn lưới theo video • Không root",14,muted,false));
+        content.addView(text("v0.7.0 • Bắn liên tục • Ưu tiên POP, fallback đổi bóng • Không root",14,muted,false));
         space(20);
         cardHeader("1. Cấp quyền");
         permissionStatus=text("Đang kiểm tra...",14,fg,false);
@@ -77,15 +77,15 @@ public final class MainActivity extends Activity {
         }
         space(23);
         cardHeader("2. Cài đặt mô hình AI");
-        content.addView(text("Phân tích pixel và tìm điểm số cao nhất chạy trực tiếp trên máy. Astra chỉ hỗ trợ khi điểm dự đoán thấp; bot không chờ API quá lâu.",13,muted,false));
+        content.addView(text("Chọn hướng bằng thuật toán pixel ngay trên máy để giảm trễ. Astra là tư vấn không đồng bộ khi không tìm được POP; app KHÔNG đợi API trước khi bắn.",13,muted,false));
         space(10);
         endpoint=field("API base URL",store.getText("endpoint","https://api.xingchiapi.com/v1"),false);
         model=field("Model",store.getText("model","gpt-6-astra"),false);
         api=field("API key (để trống để giữ key cũ)","",true);
         aiEnabled=new CheckBox(this);
-        aiEnabled.setText("Bật GPT-6 Astra hỗ trợ khi cần (gửi ảnh màn hình tới API)");
+        aiEnabled.setText("Astra tư vấn nền khi không thấy POP (gửi ảnh qua API, có thể phát sinh chi phí)");
         aiEnabled.setTextColor(fg);
-        aiEnabled.setChecked(store.getBoolean("ai_enabled",true));
+        aiEnabled.setChecked(store.getBoolean("ai_enabled",false));
         content.addView(aiEnabled);
         Button erase=button("Xoá API key đã lưu");
         content.addView(erase);
@@ -95,7 +95,7 @@ public final class MainActivity extends Activity {
         });
         space(20);
         cardHeader("3. Hiệu chỉnh cho game trong ảnh");
-        content.addView(text("Tự đo biên sân theo pixel, tìm góc bắn thẳng và bật tường 1–3 lần, chỉ tính điểm tại quả bóng va chạm đầu tiên. Đợi 2 khung hình ổn định để tránh bắn lặp.",13,muted,false));
+        content.addView(text("Tự căn lại lưới khi đổi hàng, mô phỏng va chạm đầu tiên và bật tường 1–3 lần. Khi không có POP, chọn đường ghép cùng màu hoặc bắn đổi bóng, không dừng tự động. Đợi 2 ảnh giống nhau để chống bắn trùng.",13,muted,false));
         space(5);
         topY=field("Tâm hàng bóng đầu (% chiều cao)",store.getText("top_pct","11.36"),false);
         launchY=field("Tâm bóng ở nòng bắn (% chiều cao)",store.getText("launch_pct","75.86"),false);

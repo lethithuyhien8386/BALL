@@ -4,9 +4,9 @@ package com.example.bubblepilot;
  * A small, deterministic state machine for continuous play.
  *
  * Never repeat a shot while the captured board has not demonstrably progressed.
- * Wait for two matching, valid frames after a change before allowing another shot.
- * This is a safety/accuracy tradeoff: shooting faster than the game's animation
- * settles risks duplicate shots into an old board.
+ * Wait for two matching valid frames after a visible change before firing
+ * again. Time gating is intentionally short; stable screenshots, rather than a
+ * long fixed sleep, determine when the next projectile is ready.
  */
 public final class ShotGate {
     static final long NONE = Long.MIN_VALUE;
@@ -34,8 +34,11 @@ public final class ShotGate {
     public boolean canShoot(long currentSignature, long elapsedRealtimeMs) {
         if (currentSignature == NONE) return false;
         if (lastFiredSignature != NONE) {
-            if (currentSignature != lastFiredSignature) transitionSeen = true;
-            if (!transitionSeen || elapsedRealtimeMs - lastFiredAt < 240) return false;
+            // Missing/unstable screenshots alone are not proof that a previous
+            // tap was accepted by the game. Never double-fire the same board.
+            if (currentSignature == lastFiredSignature) return false;
+            transitionSeen = true;
+            if (elapsedRealtimeMs - lastFiredAt < 120) return false;
         }
         if (stableSignature != currentSignature) {
             stableSignature = currentSignature;

@@ -43,9 +43,9 @@ public final class GameAccessibilityService extends AccessibilityService {
     private TextView status;
     private boolean running=false, screenshotPending=false;
     private final ShotGate shotGate = new ShotGate();
-    private static final long FRAME_CHECK_MS = 115;
-    private static final long ASTRA_MAX_WAIT_MS = 170;
-    private long pendingApiSignature=Long.MIN_VALUE,pendingApiSince=0;
+    private static final long FRAME_CHECK_MS = 55;
+    private long screenshotRetryDelayMs = 140;
+    private long pendingApiSignature=Long.MIN_VALUE;
     private long remoteSignature=Long.MIN_VALUE,remoteReceivedAt=0;
     private RemoteAdvisor.Point remotePoint=null;
     private String lastMessage="Sẵn sàng";
@@ -151,6 +151,7 @@ public final class GameAccessibilityService extends AccessibilityService {
         shotGate.reset();
         pendingApiSignature=Long.MIN_VALUE;remoteSignature=Long.MIN_VALUE;
         remotePoint=null;
+        screenshotRetryDelayMs=140;
         updateStatus("RUNNING");
         scheduleFrame(runId,100);
     }
@@ -177,7 +178,7 @@ public final class GameAccessibilityService extends AccessibilityService {
                 if(bitmap==null) {
                     main.post(()->{
                         screenshotPending=false;
-                        if(token==runId && running)scheduleFrame(token,220);
+                        if(token==runId && running)scheduleFrame(token,75);
                     });
                 } else processBitmap(bitmap,token);
             });
@@ -195,17 +196,23 @@ public final class GameAccessibilityService extends AccessibilityService {
                     } catch(Exception ignore){} finally {if(hw!=null)hw.close();}
                     if(copy==null) {
                         screenshotPending=false;
-                        if(token==runId && running) {updateStatus("ẢNH LỖI");scheduleFrame(token,500);}
+                        if(token==runId && running) {updateStatus("ẢNH LỖI");scheduleFrame(token,250);}
                         return;
                     }
                     final Bitmap bitmap=copy;
+                    screenshotRetryDelayMs=Math.max(140,screenshotRetryDelayMs-25);
                     visionWorker.execute(()->processBitmap(bitmap,token));
                 }
                 @Override public void onFailure(int code) {
                     screenshotPending=false;
                     if(token==runId && running) {
                         updateStatus("SCREEN "+code);
-                        scheduleFrame(token,code==ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT?450:900);
+                        if(code==ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT) {
+                            // Android throttles Accessibility screenshots.
+                            // Back off only when the OS actually rejects us.
+                            screenshotRetryDelayMs=Math.min(380,screenshotRetryDelayMs+65);
+                            scheduleFrame(token,screenshotRetryDelayMs);
+                        } else scheduleFrame(token,300);
                     }
                 }
             });
@@ -244,7 +251,7 @@ public final class GameAccessibilityService extends AccessibilityService {
             if(analysis!=null && !analysis.isRecycled())analysis.recycle();
             main.post(()->{
                 screenshotPending=false;
-                if(token==runId && running) {updateStatus("VISION ERR");scheduleFrame(token,600);}
+                if(token==runId && running) {updateStatus("VISION ERR");scheduleFrame(token,200);}
             });
         }
     }
@@ -258,68 +265,74 @@ public final class GameAccessibilityService extends AccessibilityService {
             return;
         }
         final long now=SystemClock.elapsedRealtime();
+        // Optional GPT-6 Astra side-channel: submit only once per new
+        // zero-pop board, while we are already observing it. Never wait for
+        // HTTP before clicking; only a response that arrives in time and
+        // passes local collision validation may affect the choice.
+        if(shot!=null && shot.matched<3 &&
+                pendingApiSignature!=board.signature) {
+            SecretStore prefs=new SecretStore(this);
+            if(prefs.getBoolean("ai_enabled",false)) {
+                String key=prefs.readKey();
+                if(!key.isEmpty()) {
+                    pendingApiSignature=board.signature;
+                    remotePoint=null;
+                    remoteSignature=Long.MIN_VALUE;
+                    remote.request(image,board.signature,
+                            prefs.getText("endpoint","https://api.xingchiapi.com/v1"),
+                            prefs.getText("model","gpt-6-astra"),key,
+                            (signature,point,info)->{
+                                if(token!=runId || !running)return;
+                                remoteSignature=signature;
+                                remotePoint=point;
+                                remoteReceivedAt=SystemClock.elapsedRealtime();
+                            });
+                }
+            }
+        }
         if(!shotGate.canShoot(board.signature,now)) {
             image.recycle();
             updateStatus("CHỜ LƯỢT");
             scheduleFrame(token,FRAME_CHECK_MS);
             return;
         }
-        // A non-matching projectile LOSES points in this game. The old code
-        // sent shots with matched=0 as soon as the API wait expired. Block
-        // these entirely; an uncertain shot is worse than waiting.
-        if(shot==null || shot.matched<3 || shot.reliability<.80) {
-            SecretStore prefs=new SecretStore(this);
-            boolean useAstra=prefs.getBoolean("ai_enabled",true)
-                    && !prefs.readKey().isEmpty();
-            if(useAstra && pendingApiSignature!=board.signature) {
-                pendingApiSignature=board.signature;
-                remotePoint=null;remoteSignature=Long.MIN_VALUE;
-                final int requestToken=token;
-                remote.request(image,board.signature,
-                        prefs.getText("endpoint","https://api.xingchiapi.com/v1"),
-                        prefs.getText("model","gpt-6-astra"),prefs.readKey(),
-                        (signature,point,status)->{
-                            if(requestToken!=runId || !running)return;
-                            remoteSignature=signature;
-                            remotePoint=point;
-                            remoteReceivedAt=SystemClock.elapsedRealtime();
-                        });
-            }
-            // Astra is a suggestion source, NEVER a bypass of collision,
-            // match-3 or small-aim-perturbation validation.
-            GameSolver.Shot verified=null;
-            if(remoteSignature==board.signature && remotePoint!=null &&
-                    now-remoteReceivedAt<15000)
-                verified=solver().safeShotAtTap(board,remotePoint.x,remotePoint.y);
-            image.recycle();
-            if(verified==null) {
-                updateStatus(!useAstra || remoteSignature==board.signature?
-                        "KHÔNG CÓ POP":"CHỜ POP/AI");
-                scheduleFrame(token,FRAME_CHECK_MS);
-                return;
-            }
-            performTap(token,verified,scaleX,scaleY);
+        // Do not stop on a no-pop turn: the player explicitly prefers to
+        // advance to the next projectile, even when that incurs a penalty.
+        // Local ray tracing has deterministic latency; do not wait for Astra.
+        // An already-available Astra proposal may replace a setup shot only
+        // if the very same board signature confirms an actual pop.
+        GameSolver.Shot chosen=shot;
+        if(chosen!=null && chosen.matched<3 &&
+                remoteSignature==board.signature && remotePoint!=null &&
+                now-remoteReceivedAt<1500) {
+            GameSolver.Shot suggestion=solver().safeShotAtTap(board,remotePoint.x,remotePoint.y);
+            if(suggestion!=null && suggestion.matched>=3)chosen=suggestion;
+        }
+        image.recycle();
+        if(chosen==null) {
+            // No identifiable landing site / projectile yet. Never tap menus
+            // or stale animations; retry the very next screenshot.
+            updateStatus("CHỜ KHUNG ẢNH");
+            scheduleFrame(token,FRAME_CHECK_MS);
             return;
         }
-        // CPU plan is available and validated; never wait for network latency.
-        image.recycle();
-        performTap(token,shot,scaleX,scaleY);
+        performTap(token,chosen,scaleX,scaleY);
     }
     private void performTap(int token,GameSolver.Shot shot,float scaleX,float scaleY) {
         if(!running || token!=runId)return;
-        if(shot==null || shot.matched<3 || shot.reliability<.80) {
-            updateStatus("BLOCK NO POP");
+        if(shot==null) {
+            updateStatus("CHỜ BÓNG");
             scheduleFrame(token,FRAME_CHECK_MS);
             return;
         }
         Path path=new Path();
         path.moveTo(Math.round(shot.tapX*scaleX),Math.round(shot.tapY*scaleY));
-        GestureDescription.StrokeDescription stroke=new GestureDescription.StrokeDescription(path,0,55);
+        GestureDescription.StrokeDescription stroke=new GestureDescription.StrokeDescription(path,0,35);
         GestureDescription gesture=new GestureDescription.Builder().addStroke(stroke).build();
         try {
             boolean sent=dispatchGesture(gesture,new GestureResultCallback(){
                 @Override public void onCompleted(GestureDescription d) {
-                    if(token==runId && running)scheduleFrame(token,FRAME_CHECK_MS);
+                    if(token==runId && running)scheduleFrame(token,35);
                 }
                 @Override public void onCancelled(GestureDescription d) {
                     if(token==runId && running) {
@@ -331,7 +344,7 @@ public final class GameAccessibilityService extends AccessibilityService {
                 shotGate.shotDispatched(shot.stateSignature,SystemClock.elapsedRealtime());
                 String routeLabel=shot.bounces>0?"B"+shot.bounces+" ":"";
                 updateStatus(routeLabel+(shot.matched>=3?"POP "+shot.matched:
-                        "AIM "+Math.round(shot.angle)));
+                        (shot.score>0?"GHÉP CHỜ":"ĐỔI BÓNG")));
             } else {updateStatus("TAP ERR");scheduleFrame(token,700);}
         } catch(Exception e) {updateStatus("TAP ERR");scheduleFrame(token,700);}
     }

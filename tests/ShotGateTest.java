@@ -16,7 +16,7 @@ public class ShotGateTest {
         gate.observedNoBoard();
         assertYes(!gate.canShoot(222,850), "Animation must not be considered ready");
         assertYes(!gate.canShoot(222,1120), "Transitioned board still needs stability");
-        assertYes(gate.canShoot(222,1250), "Ready after transient missing board");
+        assertYes(!gate.canShoot(222,1250), "Never double fire same board even after a missing frame");
         gate.reset();
         assertYes(!gate.canShoot(333,0) && gate.canShoot(333,100), "Reset starts fresh");
         System.out.println("ShotGate tests PASS");
