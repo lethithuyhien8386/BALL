@@ -12,7 +12,7 @@ The ZIP was built so that `.github/workflows/build-apk.yml` sits in the **root**
 4. After a successful run, open the build and find **Artifacts** > **BubblePilot-Astra-debug-APK**.
 5. Download and extract the GitHub artifact ZIP to obtain `app-debug.apk`. Transfer it to Android and install it (allow installation from that source if Android prompts you).
 
-GitHub downloads Gradle **8.9**, Android SDK **35** and JDK **17**. The workflow tests the solver and state machine, compiles the debug APK, and publishes it as an artifact. **No private API key is needed in GitHub Actions.** Enter the key only inside the installed app.
+GitHub downloads Gradle **8.9**, Android SDK **35** and JDK **17**. The workflow uses `android-actions/setup-android@v4` to avoid the deprecated Android SDK `tools` package error seen with `@v3`. If you already uploaded an older ZIP to GitHub, replace `.github/workflows/build-apk.yml` with this updated file and commit before rerunning. The workflow tests the solver and state machine, compiles the debug APK, and publishes it as an artifact. **No private API key is needed in GitHub Actions.** Enter the key only inside the installed app.
 
 Build can also be done in Android Studio using JDK 17 / Gradle 8.9 / SDK 35. There is no bundled Gradle-wrapper JAR; the GitHub workflow uses a known installed Gradle version instead.
 
