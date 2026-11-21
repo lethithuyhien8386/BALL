@@ -250,31 +250,30 @@ public final class GameAccessibilityService extends AccessibilityService {
     }
     private void onFrame(int token,Bitmap image,GameSolver.Board board,GameSolver.Shot shot,
                          String report,float scaleX,float scaleY) {
-        if(board==null || shot==null) {
+        if(board==null) {
             image.recycle();
-            if(board==null)shotGate.observedNoBoard();
-            updateStatus(board==null?report:"KHÔNG CÓ GÓC");
+            shotGate.observedNoBoard();
+            updateStatus(report);
             scheduleFrame(token,FRAME_CHECK_MS);
             return;
         }
-        long now=SystemClock.elapsedRealtime();
-        // After a shot, require a new board or a transient projectile animation,
-        // followed by two identical valid frames. No timer-only duplicate shots.
+        final long now=SystemClock.elapsedRealtime();
         if(!shotGate.canShoot(board.signature,now)) {
             image.recycle();
             updateStatus("CHỜ LƯỢT");
             scheduleFrame(token,FRAME_CHECK_MS);
             return;
         }
-
-        SecretStore prefs=new SecretStore(this);
-        boolean useAstra=prefs.getBoolean("ai_enabled",true) && !prefs.readKey().isEmpty();
-        if(useAstra && shot.score<35) {
-            if(pendingApiSignature!=board.signature) {
+        // A non-matching projectile LOSES points in this game. The old code
+        // sent shots with matched=0 as soon as the API wait expired. Block
+        // these entirely; an uncertain shot is worse than waiting.
+        if(shot==null || shot.matched<3 || shot.reliability<.80) {
+            SecretStore prefs=new SecretStore(this);
+            boolean useAstra=prefs.getBoolean("ai_enabled",true)
+                    && !prefs.readKey().isEmpty();
+            if(useAstra && pendingApiSignature!=board.signature) {
                 pendingApiSignature=board.signature;
-                pendingApiSince=now;
-                remotePoint=null;
-                remoteSignature=Long.MIN_VALUE;
+                remotePoint=null;remoteSignature=Long.MIN_VALUE;
                 final int requestToken=token;
                 remote.request(image,board.signature,
                         prefs.getText("endpoint","https://api.xingchiapi.com/v1"),
@@ -284,27 +283,35 @@ public final class GameAccessibilityService extends AccessibilityService {
                             remoteSignature=signature;
                             remotePoint=point;
                             remoteReceivedAt=SystemClock.elapsedRealtime();
-                            if(point!=null)updateStatus("ASTRA READY");
                         });
             }
+            // Astra is a suggestion source, NEVER a bypass of collision,
+            // match-3 or small-aim-perturbation validation.
+            GameSolver.Shot verified=null;
             if(remoteSignature==board.signature && remotePoint!=null &&
-                    now-remoteReceivedAt<1600) {
-                GameSolver.Shot candidate=solver().shotAtTap(board,remotePoint.x,remotePoint.y);
-                // Cloud recommendations are scored by the identical local rules;
-                // never blindly replace a higher scoring pixel-based shot.
-                if(candidate!=null && candidate.score>shot.score+1.0)shot=candidate;
-            } else if(now-pendingApiSince<ASTRA_MAX_WAIT_MS) {
-                image.recycle();
-                updateStatus("ASTRA...");
+                    now-remoteReceivedAt<15000)
+                verified=solver().safeShotAtTap(board,remotePoint.x,remotePoint.y);
+            image.recycle();
+            if(verified==null) {
+                updateStatus(!useAstra || remoteSignature==board.signature?
+                        "KHÔNG CÓ POP":"CHỜ POP/AI");
                 scheduleFrame(token,FRAME_CHECK_MS);
                 return;
             }
+            performTap(token,verified,scaleX,scaleY);
+            return;
         }
+        // CPU plan is available and validated; never wait for network latency.
         image.recycle();
         performTap(token,shot,scaleX,scaleY);
     }
     private void performTap(int token,GameSolver.Shot shot,float scaleX,float scaleY) {
         if(!running || token!=runId)return;
+        if(shot==null || shot.matched<3 || shot.reliability<.80) {
+            updateStatus("BLOCK NO POP");
+            scheduleFrame(token,FRAME_CHECK_MS);
+            return;
+        }
         Path path=new Path();
         path.moveTo(Math.round(shot.tapX*scaleX),Math.round(shot.tapY*scaleY));
         GestureDescription.StrokeDescription stroke=new GestureDescription.StrokeDescription(path,0,55);

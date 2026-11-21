@@ -47,7 +47,7 @@ public final class MainActivity extends Activity {
 
         TextView heading=text("BUBBLE PILOT",25,fg,true);
         content.addView(heading);
-        content.addView(text("v0.5.0 • Tránh bóng chắn • Bật tường chính xác • Không root",14,muted,false));
+        content.addView(text("v0.6.0 • Chỉ bắn khi có POP • Tự căn lưới theo video • Không root",14,muted,false));
         space(20);
         cardHeader("1. Cấp quyền");
         permissionStatus=text("Đang kiểm tra...",14,fg,false);

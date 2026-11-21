@@ -1,16 +1,10 @@
-# Changelog
+# v0.6.0 — Video-driven no-penalty fix
 
-## v0.5.0 — Trajectory / Bank-shot fix
-
-- Dynamically locate both physical arena walls from screenshot pixel gradients. Fall back to inferred grid edges when the boundary cannot be detected.
-- Trace the physical ray against *all* board balls and stop on the nearest object, independently in each reflected segment. Treat white/special balls as blocking objects.
-- Reject snap cells on the far side of the first-hit ball or outside a narrow collision tolerance.
-- Generate direct and up to three-reflection angles using mirrored virtual targets; improve the best candidates with local angle refinement.
-- Score the actual integer screen tap angle; rerank finalists under angle, wall and ball-radius perturbations.
-- Score dropped bubbles only if originally connected to ceiling; keep visible-pixel scoring.
-- Show `B1`/`B2`/`B3` in floating UI for reflected shots.
-- Add physics, geometry and regression tests; bump APK version to 5 / 0.5.0.
-
-## v0.4.0 — Multicolor and continuous-play fix
-
-Recognize purple/blue/special bubbles, self-calibrate grid, keep repeat-shot protection and Astra fallback.
+- Guarded gesture dispatch against any predicted shot with fewer than three matching balls or <80% trajectory stability.
+- Expanded display-geometry calibration for letterboxed/narrower arenas from actual video.
+- Learned left/right playfield walls instead of outer recording borders.
+- Added dual checkerboard parity (wide/narrow ceiling row) with recalibration after row changes.
+- Dynamically detected shooter position and color; blocked false cyan dragon pixels and projectile-in-flight frames.
+- Validated optional Astra suggestions through local `safeShotAtTap` with match/stability requirements; no blocking of a verified local shot.
+- Added video regression tests from seven user-supplied frames and no-match synthetic game state.
+- Preserved Android 8+ setup, Accessibility & floating overlay, and GitHub APK build/install verification.

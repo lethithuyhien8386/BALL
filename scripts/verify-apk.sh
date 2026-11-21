@@ -19,8 +19,8 @@ fi
 BADGING="$("$SDK_TOOLS/aapt" dump badging "$APK")"
 echo "$BADGING" | grep -q "package: name='com.example.bubblepilot'"
 echo "$BADGING" | grep -q "sdkVersion:'26'"
-echo "$BADGING" | grep -q "versionCode='5'"
-echo "$BADGING" | grep -q "versionName='0.5.0'"
+echo "$BADGING" | grep -q "versionCode='6'"
+echo "$BADGING" | grep -q "versionName='0.6.0'"
 {
   echo "Bubble Pilot Astra — debug APK verification"
   echo "The ZIP uploaded by GitHub Actions is only a container. Extract app-debug.apk inside it."

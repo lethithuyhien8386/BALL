@@ -43,6 +43,9 @@ public final class GameSolver {
         public double radiusX = .038;
         // Filled from screen pixels when distinct arena edges are visible.
         boolean detectedArena = false;
+        // The game shifts its checkerboard by one row during play. In some
+        // frames the ceiling row has 10 bubbles, in others only 9.
+        boolean narrowTop = true;
     }
     public static final class Ball {
         public final int row, col;
@@ -59,13 +62,19 @@ public final class GameSolver {
         public final int width, height;
         public final char shooter;
         public final double radius, topY, shooterX, shooterY, leftWall, rightWall;
+        public final double shooterConfidence;
         public final int count;
         public final long signature;
         private final Configuration cfg;
+        public final int ceilingRow;
         Board(int w,int h, Configuration cfg, Ball[][] found, char shot, int n, long hash) {
+            this(w,h,cfg,found,shot,n,hash,w*cfg.launchX,h*cfg.launchY,1.0);
+        }
+        Board(int w,int h, Configuration cfg, Ball[][] found, char shot, int n, long hash,
+              double launchX,double launchY,double confidence) {
             width=w; height=h; this.cfg=cfg; shooter=shot;count=n;signature=hash;
             radius=w*cfg.radiusX; topY=h*cfg.topY;
-            shooterX=w*cfg.launchX; shooterY=h*cfg.launchY;
+            shooterX=launchX; shooterY=launchY;shooterConfidence=confidence;
             // The arena shifts between game scenes. A fixed fraction of screen
             // width placed the left rebound wall about 13 px too far left in
             // the second supplied screenshot. Estimate ball-center wall limits
@@ -84,12 +93,21 @@ public final class GameSolver {
                 leftWall=gridLeft;rightWall=gridRight;
             } else {leftWall=fallbackLeft;rightWall=fallbackRight;}
             for (int r=0;r<ROWS;r++) System.arraycopy(found[r],0,balls[r],0,COLS);
+            int first=0;
+            while(first<ROWS) {
+                boolean nonEmpty=false;
+                for(Ball ball:found[first])if(ball!=null){nonEmpty=true;break;}
+                if(nonEmpty)break;
+                first++;
+            }
+            ceilingRow=first==ROWS?0:first;
         }
         double gridX(int r,int c) {
-            return width*(cfg.oddX+cfg.colPitch*c+((r&1)==0?cfg.colPitch*.5:0));
+            return width*(cfg.oddX+cfg.colPitch*c+((r&1)==(cfg.narrowTop?0:1)?cfg.colPitch*.5:0));
         }
         double gridY(int r) {return height*(cfg.topY+r*cfg.rowPitch);}
-        boolean exists(int r,int c) {return r>=0 && r<ROWS && c>=0 && c<((r&1)==0?9:10);}
+        boolean exists(int r,int c) {return r>=0 && r<ROWS && c>=0 &&
+                        c<((r&1)==(cfg.narrowTop?0:1)?9:10);}
     }
     public static final class Shot {
         public final int tapX,tapY;
@@ -137,14 +155,17 @@ public final class GameSolver {
     private static final class SavedLayout {
         final int w,h;
         final double topY,oddX,colPitch,rowPitch,radiusX;
+        final boolean narrowTop;
         SavedLayout(int w,int h,Configuration c) {
             this.w=w;this.h=h;topY=c.topY;oddX=c.oddX;
             colPitch=c.colPitch;rowPitch=c.rowPitch;radiusX=c.radiusX;
+            narrowTop=c.narrowTop;
         }
         Configuration apply(Configuration input) {
             Configuration result=copy(input);
             result.topY=topY;result.oddX=oddX;
             result.colPitch=colPitch;result.rowPitch=rowPitch;result.radiusX=radiusX;
+            result.narrowTop=narrowTop;
             return result;
         }
     }
@@ -156,7 +177,7 @@ public final class GameSolver {
         b.topY=a.topY;b.launchY=a.launchY;b.launchX=a.launchX;
         b.boardLeft=a.boardLeft;b.boardRight=a.boardRight;
         b.oddX=a.oddX;b.colPitch=a.colPitch;b.rowPitch=a.rowPitch;
-        b.radiusX=a.radiusX;b.detectedArena=a.detectedArena;
+        b.radiusX=a.radiusX;b.detectedArena=a.detectedArena;b.narrowTop=a.narrowTop;
         return b;
     }
 
@@ -207,16 +228,23 @@ public final class GameSolver {
     }
     private static int circularQuality(int[] data,int w,int h,double x,double y,double r) {
         int contrast=0,strongEdges=0;
+        boolean leftEdge=false,rightEdge=false,verticalEdge=false;
         for(int i=0;i<EDGEX.length;i++) {
             int inside=pix(data,w,h,x+EDGEX[i]*r*.58,y+EDGEY[i]*r*.58);
             int outside=pix(data,w,h,x+EDGEX[i]*r*1.20,y+EDGEY[i]*r*1.20);
             int delta=difference(inside,outside);
             contrast+=delta;
-            if(delta>70)strongEdges++;
+            if(delta>70) {
+                strongEdges++;
+                if(i==0)rightEdge=true;
+                if(i==2)leftEdge=true;
+                if(i==1 || i==3)verticalEdge=true;
+            }
         }
         // A horizontal border in the scenery can create a huge contrast sum,
         // but a real circular bubble has visible edges in most directions.
-        return strongEdges>=5 && contrast>EDGEX.length*77 ? strongEdges : 0;
+        return strongEdges>=5 && leftEdge && rightEdge && verticalEdge &&
+               contrast>EDGEX.length*77 ? strongEdges : 0;
     }
     private static boolean hasCircularEdge(int[] data,int w,int h,double x,double y,double r) {
         return circularQuality(data,w,h,x,y,r)>0;
@@ -265,8 +293,9 @@ public final class GameSolver {
         for(int row=0;row<maxRows;row++) {
             double y=h*(c.topY+row*c.rowPitch);
             if(y>h*.52)break;
-            for(int col=0;col<((row&1)==0?9:10);col++) {
-                double x=w*(c.oddX+c.colPitch*col+((row&1)==0?c.colPitch*.5:0));
+            for(int col=0;col<((row&1)==(c.narrowTop?0:1)?9:10);col++) {
+                double x=w*(c.oddX+c.colPitch*col+
+                        ((row&1)==(c.narrowTop?0:1)?c.colPitch*.5:0));
                 if(x<radius*1.1 || x>w-radius*1.1)continue;
                 if(patchColor(px,w,h,x,y,radius)!=' ') {
                     int quality=circularQuality(px,w,h,x,y,radius);
@@ -281,7 +310,7 @@ public final class GameSolver {
         // greater importance to reject misleading colored scenery.
         return score+top*.08+(found>=4?1:0);
     }
-    private static Configuration findLayout(int[] px,int w,int h,Configuration original) {
+    private static Configuration findLayoutLegacy(int[] px,int w,int h,Configuration original) {
         LayoutCandidate winner=null;
         // Geometry is relative to the screen size and game artwork. Shifted HUDs
         // move the whole grid even though the launcher stays near the bottom.
@@ -291,6 +320,7 @@ public final class GameSolver {
             for(double x=.140;x<=.1951;x+=.005)
                 for(double top=.102;top<=.1711;top+=.005) {
                     Configuration c=copy(original);
+                    c.narrowTop=true;
                     c.colPitch=pitch;c.rowPitch=yp;c.oddX=x-pitch*.5;
                     c.topY=top;
                     double score=fit(px,w,h,c,7);
@@ -311,11 +341,82 @@ public final class GameSolver {
                 for(double xx=seedX-.006;xx<=seedX+.0061;xx+=.002)
                     for(double yy=seedTop-.006;yy<=seedTop+.0061;yy+=.002) {
                         Configuration ref=copy(original);
+                        ref.narrowTop=true;
                         ref.colPitch=pxPitch;ref.rowPitch=pyPitch;ref.topY=yy;
                         ref.oddX=xx-pxPitch*.5;
                         double score=fit(px,w,h,ref,8);
                         if(score>best){best=score;c=ref;}
                     }
+        return c;
+    }
+    private static Configuration findLayout(int[] px,int w,int h,Configuration original) {
+        // Video regression: actual arena in the 720x1292 recording is narrower
+        // than the screenshot-only fixtures. Derive pitch from VISIBLE walls,
+        // not a fixed fraction of screen width. The 10-column row spans one
+        // arena width, and staggered centers alternate by half a pitch.
+        double[] edges=detectArenaEdges(px,w,h,w*.023);
+        // Preserve the proven original artwork calibration when the arena
+        // occupies most of the image; use the adaptive model for recordings
+        // with a narrower inset arena and dynamic 9/10-row orientation.
+        if(edges!=null && (edges[1]-edges[0])/w>.79) {
+            Configuration old=findLayoutLegacy(px,w,h,original);
+            if(old!=null && detectAt(px,w,h,old).count>=55)return old;
+        }
+        LayoutCandidate winner=null;
+        if(edges!=null) {
+            double span=edges[1]-edges[0];
+            for(double pitchScale:new double[]{.975,.99,1.005,1.02}) {
+                double pitch=span/10.0*pitchScale;
+                for(boolean narrow:new boolean[]{true,false})
+                    for(double offset:new double[]{.47,.54,.61,.68,.75})
+                        for(double rowFactor:new double[]{.84,.88,.92})
+                            for(double top=.105;top<=.207;top+=.004) {
+                            Configuration c=copy(original);
+                            c.narrowTop=narrow;
+                            c.colPitch=pitch/w;c.rowPitch=pitch*rowFactor/h;
+                            c.oddX=(edges[0]+pitch*offset)/w;
+                            c.radiusX=pitch*.465/w;c.topY=top;
+                            c.boardLeft=edges[0]/w;c.boardRight=edges[1]/w;
+                            c.detectedArena=true;
+                            double score=fit(px,w,h,c,9);
+                            if(winner==null || score>winner.points)
+                                winner=new LayoutCandidate(c,score);
+                        }
+            }
+        }
+        // When arena edges are hidden, search an expanded set of dimensions.
+        // Do not assume screenshots all use the same artwork scale.
+        if(winner==null || winner.points<13) {
+            double[] pitches={.073,.078,.083,.088};
+            double[] rowPitches={.034,.038,.042};
+            for(double pitch:pitches)for(double yp:rowPitches)
+                for(boolean narrow:new boolean[]{true,false})
+                    for(double x=.12;x<=.2351;x+=.009)
+                        for(double top=.105;top<=.2051;top+=.008) {
+                        Configuration c=copy(original);
+                        c.narrowTop=narrow;
+                        c.colPitch=pitch;c.rowPitch=yp;c.oddX=x-pitch*.5;
+                        c.radiusX=pitch*.465;c.topY=top;
+                        double score=fit(px,w,h,c,9);
+                        if(winner==null || score>winner.points)
+                            winner=new LayoutCandidate(c,score);
+                    }
+        }
+        if(winner==null || winner.points<8)return null;
+        Configuration c=winner.layout;
+        double best=winner.points;
+        double seedX=c.oddX,seedTop=c.topY;
+        double seedCP=c.colPitch,seedRP=c.rowPitch;
+        for(int dx=-2;dx<=2;dx++)for(int dy=-2;dy<=2;dy++)
+            for(int dc=-1;dc<=1;dc++)for(int dr=-1;dr<=1;dr++) {
+                Configuration ref=copy(c);
+                ref.oddX=seedX+dx*1.1/w;
+                ref.topY=seedTop+dy*1.1/h;
+                ref.colPitch=seedCP+dc*.45/w;
+                ref.rowPitch=seedRP+dr*.45/h;
+                double score=fit(px,w,h,ref,10);
+                if(score>best){best=score;c=ref;}
+            }
         return c;
     }
     /**
@@ -326,24 +427,75 @@ public final class GameSolver {
      * fixed percentage of the display width.
      */
     private static double[] detectArenaEdges(int[] pixels,int w,int h,double radius) {
-        int y0=(int)(h*.45),y1=(int)(h*.70),step=Math.max(2,h/220);
-        int[] boundaries={Math.max(1,(int)(w*.025)),Math.min(w-3,(int)(w*.19)),
-                          Math.max(1,(int)(w*.77)),Math.min(w-3,(int)(w*.986))};
-        int[] bestX={-1,-1};double[] bestMean={0,0};
-        for(int side=0;side<2;side++) {
-            for(int x=boundaries[side*2];x<=boundaries[side*2+1];x++) {
-                long total=0;int n=0;
-                for(int y=y0;y<y1;y+=step) {
-                    total+=difference(pixels[y*w+x],pixels[y*w+x+1]);n++;
-                }
-                double avg=total/(3.0*Math.max(1,n));
-                if(avg>bestMean[side]) {bestMean[side]=avg;bestX[side]=x;}
+        int y0=(int)(h*.46),y1=(int)(h*.66),step=Math.max(2,h/220);
+        int[] limits={Math.max(1,(int)(w*.02)),Math.min(w-3,(int)(w*.25)),
+                      Math.max(1,(int)(w*.74)),Math.min(w-3,(int)(w*.99))};
+        double[][] peaks=new double[2][w];
+        for(int side=0;side<2;side++)for(int x=limits[side*2];x<=limits[side*2+1];x++) {
+            long total=0;int n=0;
+            for(int y=y0;y<y1;y+=step) {
+                total+=difference(pixels[y*w+x],pixels[y*w+x+1]);n++;
+            }
+            peaks[side][x]=total/(3.0*Math.max(1,n));
+        }
+        // Some screen recordings have an OUTER frame around the actual arena.
+        // The largest isolated edge is then NOT the wall! Pair candidate lines
+        // symmetrically around the launcher and reject implausible widths.
+        double best=-1;int left=-1,right=-1;
+        for(int l=limits[0];l<=limits[1];l++) {
+            if(peaks[0][l]<11)continue;
+            for(int r=limits[2];r<=limits[3];r++) {
+                if(peaks[1][r]<11)continue;
+                double span=r-l,center=(l+r)*.5;
+                if(span<w*.68 || span>w*.89 || Math.abs(center-w*.495)>w*.038 ||
+                   span<radius*7 || l+radius>=r-radius)continue;
+                double quality=Math.min(peaks[0][l],peaks[1][r])
+                               +.35*(peaks[0][l]+peaks[1][r]);
+                quality-=Math.abs(center-w*.495)*.09;
+                if(quality>best) {best=quality;left=l;right=r;}
             }
         }
-        if(bestX[0]<0 || bestX[1]<0 || bestMean[0]<12 || bestMean[1]<12 ||
-           bestX[1]-bestX[0]<w*.63 || bestX[1]-bestX[0]>w*.95 ||
-           bestX[0]+radius>=bestX[1]-radius)return null;
-        return new double[]{bestX[0],bestX[1]};
+        return left<0?null:new double[]{left,right};
+    }
+    private static final class LauncherBall {
+        final double x,y,confidence;
+        final char color;
+        LauncherBall(double x,double y,char color,double confidence) {
+            this.x=x;this.y=y;this.color=color;this.confidence=confidence;
+        }
+    }
+    private static LauncherBall findLauncher(int[] pixels,int w,int h,Configuration cfg) {
+        double r=w*cfg.radiusX;
+        // The video shows the loaded ball 20-30px ABOVE the old launchY.
+        // Search the narrow central gun channel, ignoring the next-ball slot
+        // to the right and the blue dragon sprite below the actual launcher.
+        double cx=w*cfg.launchX;
+        LauncherBall best=null;double qualityBest=-1;
+        int x0=(int)Math.max(r,cx-r*.45),x1=(int)Math.min(w-r,cx+r*.45);
+        boolean narrowArena=cfg.detectedArena && (cfg.boardRight-cfg.boardLeft)<.79;
+        int y0=(int)(h*.700),y1=(int)(h*(narrowArena?.748:.790));
+        for(int y=y0;y<=y1;y+=2)for(int x=x0;x<=x1;x+=2) {
+            char color=patchColor(pixels,w,h,x,y,r);
+            if(color==' ' || color=='W')continue;
+            int match=0,second=0;
+            for(double[] p:SAMPLE) {
+                char cls=pixelClass(pix(pixels,w,h,x+p[0]*r,y+p[1]*r));
+                if(cls==color)match++;
+                else if(cls!=' ')second++;
+            }
+            int circular=circularQuality(pixels,w,h,x,y,r);
+            if(match<9 || circular<6)continue;
+            // Prefer the upper loaded ball, not the multicolor dragon's face.
+            double q=match*1.3+circular*1.1-second*.7
+                    -Math.abs(x-w*.50)*.09
+                    -Math.abs(y-h*.738)*.012;
+            if(q>qualityBest) {
+                qualityBest=q;
+                best=new LauncherBall(x,y,color,
+                        Math.min(1.0,(match/13.0*.55+circular/8.0*.45)));
+            }
+        }
+        return best;
     }
     private static Board detectAt(int[] pixels,int w,int h,Configuration c) {
         double radius=w*c.radiusX;
@@ -368,8 +520,9 @@ public final class GameSolver {
             double y=h*(c.topY+row*c.rowPitch);
             if(y>h*c.launchY-radius*4.0)break;
             int rowCount=0;
-            for(int col=0;col<((row&1)==0?9:10);col++) {
-                double x=w*(c.oddX+c.colPitch*col+((row&1)==0?c.colPitch*.5:0));
+            for(int col=0;col<((row&1)==(c.narrowTop?0:1)?9:10);col++) {
+                double x=w*(c.oddX+c.colPitch*col+
+                        ((row&1)==(c.narrowTop?0:1)?c.colPitch*.5:0));
                 char color=patchColor(pixels,w,h,x,y,radius);
                 if(color!=' ' && hasCircularEdge(pixels,w,h,x,y,radius)) {
                     int exposed=visiblePixels(pixels,w,h,x,y,radius,color,null,row,col);
@@ -391,9 +544,21 @@ public final class GameSolver {
                 found[row][col]=new Ball(row,col,b.color,b.x,b.y,exposed);
             }
         }
-        char shooter=patchColor(pixels,w,h,w*c.launchX,h*c.launchY,radius);
+        LauncherBall launcher=findLauncher(pixels,w,h,c);
+        char shooter=launcher==null?' ':launcher.color;
+        // Never mistake the dragon's cyan body for a loaded blue ball when
+        // the entire visible board has no blue bubbles.
+        if(shooter!=' ') {
+            int same=0;
+            for(Ball[] line:found)for(Ball b:line)
+                if(b!=null && b.color==shooter)same++;
+            if(same==0) {shooter=' ';launcher=null;}
+        }
         hash^=shooter;hash*=0x100000001b3L;
-        return new Board(w,h,measured,found,shooter,count,hash);
+        return new Board(w,h,measured,found,shooter,count,hash,
+                launcher==null?w*c.launchX:launcher.x,
+                launcher==null?h*c.launchY:launcher.y,
+                launcher==null?0:launcher.confidence);
     }
     public Board detect(int[] pixels,int w,int h) {
         if(pixels==null || w<180 || h<350 || pixels.length!=w*h) {
@@ -403,6 +568,17 @@ public final class GameSolver {
         SavedLayout previous=savedLayout;
         if(previous!=null && previous.w==w && previous.h==h) calibrated=previous.apply(cfg);
         Board result=calibrated==null?null:detectAt(pixels,w,h,calibrated);
+        // After a new ceiling row, the game can reverse the 9/10 bubble
+        // stagger WITHOUT moving the arena edges. Do not reuse the previous
+        // parity just because it still finds some coincidental colored pixels.
+        if(calibrated!=null && result!=null) {
+            Configuration flipped=copy(calibrated);
+            flipped.narrowTop=!flipped.narrowTop;
+            Board alternative=detectAt(pixels,w,h,flipped);
+            if(alternative.count>result.count+4) {
+                result=alternative;calibrated=flipped;
+            }
+        }
         // Refit if the HUD/grid moved, or if no longer detecting a useful board.
         // Retain the last good calibration for sparse endgame boards.
         if(result==null || result.count<3) {
@@ -415,8 +591,11 @@ public final class GameSolver {
             }
         }
         if(result==null || result.count<1) {diagnosis="KHÔNG THẤY LƯỚI";return null;}
-        if(result.shooter==' ') {diagnosis="KHÔNG THẤY BÓNG BẮN";return null;}
+        if(result.shooter==' ') {diagnosis="CHƯA CÓ BÓNG SẴN SÀNG";return null;}
         if(result.shooter=='W') {diagnosis="BÓNG ĐẶC BIỆT";return null;}
+        if(result.shooterConfidence<.80) {
+            diagnosis="MÀU BÓNG CHƯA CHẮC";return null;
+        }
         diagnosis="OK "+result.count+" BÓNG "+result.shooter;
         if(calibrated!=null && result.count>=3)savedLayout=new SavedLayout(w,h,calibrated);
         return result;
@@ -492,7 +671,7 @@ public final class GameSolver {
                 double x=b.gridX(r,c),y=b.gridY(r);
                 double dist=Math.hypot(x-contact.x,y-contact.y);
                 if(dist>reach)continue;
-                boolean connected=(r==0);
+                boolean connected=(r==b.ceilingRow);
                 if(!connected)for(int rr=Math.max(0,r-1);rr<=Math.min(ROWS-1,r+1) && !connected;rr++) {
                     for(int cc=Math.max(0,c-1);cc<=Math.min(COLS-1,c+1);cc++) {
                         if(b.balls[rr][cc]!=null && adjacent(b,r,c,rr,cc)) {
@@ -527,8 +706,10 @@ public final class GameSolver {
     private static boolean[][] connectedToCeiling(Board b,char[][] cells) {
         boolean[][] connected=new boolean[ROWS][COLS];
         ArrayDeque<int[]> queue=new ArrayDeque<>();
-        for(int col=0;col<COLS;col++)if(b.exists(0,col) && cells[0][col]!=' ') {
-            connected[0][col]=true;queue.add(new int[]{0,col});
+        for(int col=0;col<COLS;col++)if(b.exists(b.ceilingRow,col) &&
+                cells[b.ceilingRow][col]!=' ') {
+            connected[b.ceilingRow][col]=true;
+            queue.add(new int[]{b.ceilingRow,col});
         }
         while(!queue.isEmpty()) {
             int[] at=queue.removeFirst();
@@ -572,8 +753,10 @@ public final class GameSolver {
             for(int[] c:matching)cells[c[0]][c[1]]=' ';
             seen=new boolean[ROWS][COLS];
             queue.clear();
-            for(int c=0;c<9;c++)if(cells[0][c]!=' ') {
-                queue.add(new int[]{0,c});seen[0][c]=true;
+            for(int c=0;c<COLS;c++)if(b.exists(b.ceilingRow,c) &&
+                    cells[b.ceilingRow][c]!=' ') {
+                queue.add(new int[]{b.ceilingRow,c});
+                seen[b.ceilingRow][c]=true;
             }
             while(!queue.isEmpty()) {
                 int[] at=queue.removeFirst();
@@ -632,6 +815,14 @@ public final class GameSolver {
         if(b==null || x<2 || x>=b.width-2 || y<2 || y>=b.shooterY-15)return null;
         double angle=Math.toDegrees(Math.atan2(x-b.shooterX,b.shooterY-y));
         return shotAtAngle(b,asList(b),angle);
+    }
+
+    /** Only consider a remote API suggestion when it has a verified pop. */
+    public Shot safeShotAtTap(Board b,int x,int y) {
+        Shot candidate=shotAtTap(b,x,y);
+        if(candidate==null || candidate.matched<3)return null;
+        Shot checked=stabilityRank(b,asList(b),candidate);
+        return checked.reliability>=.80?checked:null;
     }
 
     /**
@@ -723,7 +914,7 @@ public final class GameSolver {
             if(cy>b.shooterY-3*b.radius)break;
             for(int c=0;c<COLS;c++) {
                 if(!b.exists(r,c) || b.balls[r][c]!=null)continue;
-                boolean reachable=(r==0);
+                boolean reachable=(r==b.ceilingRow);
                 if(!reachable)for(int rr=Math.max(0,r-1);rr<=Math.min(ROWS-1,r+1) && !reachable;rr++)
                     for(int cc=Math.max(0,c-1);cc<=Math.min(COLS-1,c+1);cc++)
                         if(b.balls[rr][cc]!=null && adjacent(b,r,c,rr,cc)) {
@@ -749,7 +940,11 @@ public final class GameSolver {
             consider(b,all,shot.angle+d,used,finalists);
         Shot best=null;
         for(Shot candidate:finalists) {
+            // Non-matching launches lose points in the actual game. Never
+            // choose a plausible-looking but non-popping random placement.
+            if(candidate.matched<3)continue;
             Shot ranked=stabilityRank(b,all,candidate);
+            if(ranked.reliability<.80)continue;
             if(best==null || ranked.score>best.score)best=ranked;
         }
         return best;
