@@ -46,6 +46,10 @@ public final class GameAccessibilityService extends AccessibilityService {
     private final SkillController skills=new SkillController();
     // Snapshot of the main-thread skill state, read by the vision worker.
     private volatile SkillVision.Kind armedSkill,pendingSkill;
+    private volatile char selectedSkillColor=' ';
+    // Worker-only last known launcher geometry for the modal that hides it.
+    private GameSolver.Board lastSkillBoard;
+    private int lastSkillRun=-1;
     private long cachedSignature=Long.MIN_VALUE;
     private int cachedX,cachedY,cachedRun=-1;
     private double cachedTop,cachedLeft,cachedRight,cachedRadius;
@@ -154,13 +158,13 @@ public final class GameAccessibilityService extends AccessibilityService {
         if(running)return;
         running=true;runId++;
         GameSolver.resetCalibration();
-        shotGate.reset();skills.reset();armedSkill=null;pendingSkill=null;
+        shotGate.reset();skills.reset();armedSkill=null;pendingSkill=null;selectedSkillColor=' ';
         screenshotRetryDelayMs=140;
         updateStatus("RUNNING");
         scheduleFrame(runId,100);
     }
     private void stopBot() {
-        running=false;runId++;skills.reset();armedSkill=null;pendingSkill=null;
+        running=false;runId++;skills.reset();armedSkill=null;pendingSkill=null;selectedSkillColor=' ';
         updateStatus("STOPPED");
     }
     private void scheduleFrame(int token,long delayMs) {
@@ -242,11 +246,27 @@ public final class GameAccessibilityService extends AccessibilityService {
             image.getPixels(rgba,0,w,0,0,w,h);
             SkillVision.Kind mode=armedSkill;
             GameSolver planner=solver().specialLauncher(mode!=null || pendingSkill==SkillVision.Kind.GOLD || pendingSkill==SkillVision.Kind.RAINBOW);
-            GameSolver.Board board=planner.detect(rgba,w,h);
+            final boolean hud=SkillVision.gameplayHud(rgba,w,h);
+            final ComboVision.Panel panel=ComboVision.detect(rgba,w,h);
+            if(panel!=null){
+                GameSolver.Board preview=planner.detectSkillPreview(rgba,w,h,panel.top,lastSkillRun==token?lastSkillBoard:null);
+                ComboVision.Choice choice=(hud||pendingSkill==SkillVision.Kind.RAINBOW)?ComboVision.choose(panel,planner,preview):null;
+                cachedRun=-1;
+                image.recycle();
+                main.post(()->{screenshotPending=false;if(token==runId&&running)onCombo(token,choice,screenW/(float)w,screenH/(float)h);});
+                return;
+            }
+            GameSolver.Board ordinary=planner.detect(rgba,w,h);
+            SkillVision.Kind active=mode!=null?mode:pendingSkill;
+            char want=active==SkillVision.Kind.GOLD?'Y':selectedSkillColor;
+            boolean verifying=(active==SkillVision.Kind.GOLD || active==SkillVision.Kind.RAINBOW) && want!=' ';
+            final GameSolver.Board board=verifying?planner.detectLoadedSkill(rgba,w,h,ordinary,
+                    lastSkillRun==token?lastSkillBoard:null,want,active==SkillVision.Kind.GOLD):ordinary;
             final boolean flight=board!=null && planner.hasAirborneBubble(rgba,board);
-            final boolean hud=GameSolver.recordedHud(rgba,w,h);
             final List<SkillVision.Icon> icons=hud
                     ? SkillVision.detect(rgba,w,h):java.util.Collections.emptyList();
+            if(board!=null&&!flight&&!verifying){lastSkillBoard=board;lastSkillRun=token;}
+            final boolean goldReady=board!=null && board.shooter=='Y' && board.shooterConfidence>=.80;
             GameSolver.Shot move=null,wildcard=null;
             if(board!=null && !flight){
                 int x=(int)Math.round(board.shooterX),y=(int)Math.round(board.shooterY);
@@ -256,10 +276,11 @@ public final class GameAccessibilityService extends AccessibilityService {
                     move=cachedShot;wildcard=cachedWildcard;
                 } else {
                     move=planner.bestShot(board);
-                    if(mode==SkillVision.Kind.RAINBOW || mode==SkillVision.Kind.GOLD ||
+                    if(mode==SkillVision.Kind.GOLD ||
                         (move!=null && move.matched<3 && SkillVision.find(icons,SkillVision.Kind.RAINBOW)!=null))
                         wildcard=planner.bestWildcardRoute(board);
-                    if(mode!=null && wildcard!=null)move=wildcard;
+                    if(mode==SkillVision.Kind.GOLD && wildcard!=null)move=wildcard;
+                    if(mode==SkillVision.Kind.RAINBOW)move=planner.bestSkillColor(board,selectedSkillColor);
                     cachedRun=token;cachedSignature=board.signature;cachedMode=mode;
                     cachedX=x;cachedY=y;cachedTop=board.topY;cachedLeft=board.leftWall;cachedRight=board.rightWall;
                     cachedRadius=board.radius;cachedShot=move;cachedWildcard=wildcard;
@@ -276,7 +297,7 @@ public final class GameAccessibilityService extends AccessibilityService {
             main.post(()->{
                 screenshotPending=false;
                 if(token==runId && running)
-                    onFrame(token,board,shotResult,wildcardResult,icons,flight,hud,report,
+                    onFrame(token,board,shotResult,wildcardResult,icons,flight,hud,goldReady,report,
                             screenW/(float)w,screenH/(float)h);
             });
         } catch(Exception error) {
@@ -287,33 +308,51 @@ public final class GameAccessibilityService extends AccessibilityService {
             });
         }
     }
+    private void syncSkills(){armedSkill=skills.armed();pendingSkill=skills.pending();selectedSkillColor=skills.comboColor();}
+    private void onCombo(int token,ComboVision.Choice choice,float scaleX,float scaleY){
+        shotGate.skillChanged();
+        if(choice==null){updateStatus("CHỌN MÀU ?");scheduleFrame(token,FRAME_CHECK_MS);return;}
+        if(!skills.canChooseColor(SystemClock.elapsedRealtime())){updateStatus("CHỜ CHỌN MÀU");scheduleFrame(token,FRAME_CHECK_MS);return;}
+        int x=Math.round(choice.option.x*scaleX),y=Math.round(choice.option.y*scaleY);
+        if(overlayCovers(x,y)){updateStatus("DỜI THANH NỔI");scheduleFrame(token,350);return;}
+        Path path=new Path();path.moveTo(x,y);
+        GestureDescription gesture=new GestureDescription.Builder().addStroke(new GestureDescription.StrokeDescription(path,0,35)).build();
+        try{
+            boolean sent=dispatchGesture(gesture,new GestureResultCallback(){
+                @Override public void onCompleted(GestureDescription d){if(token==runId&&running)scheduleFrame(token,60);}
+                @Override public void onCancelled(GestureDescription d){if(token==runId&&running){skills.colorCancelled();syncSkills();scheduleFrame(token,250);}}
+            },main);
+            if(sent){skills.colorDispatched(choice.option.color,SystemClock.elapsedRealtime());syncSkills();updateStatus("COMBO "+choice.option.color);}
+            else{updateStatus("COMBO ERR");scheduleFrame(token,250);}
+        }catch(Exception e){updateStatus("COMBO ERR");scheduleFrame(token,250);}
+    }
     private void onFrame(int token,GameSolver.Board board,GameSolver.Shot shot,
-                         GameSolver.Shot wildcard,List<SkillVision.Icon> icons,boolean flight,boolean hud,
+                         GameSolver.Shot wildcard,List<SkillVision.Icon> icons,boolean flight,boolean hud,boolean goldReady,
                          String report,float scaleX,float scaleY) {
         final long now=SystemClock.elapsedRealtime();
-        if(!flight && hud && skills.waiting()){
-            // A skill can temporarily replace the normal colored launcher;
-            // observe the HUD even when the loaded ball is not classifiable.
-            skills.observe(icons,now);
-            armedSkill=skills.armed();pendingSkill=skills.pending();
-            shotGate.skillChanged();
-            updateStatus(skills.waiting()?"CHỜ KỸ NĂNG":"KỸ NĂNG OK");
+        if(flight)shotGate.observedFlight();
+        if(hud&&skills.waiting()){
+            skills.observe(icons,now,board!=null&&!flight,goldReady&&!flight);
+            syncSkills();shotGate.skillChanged();
+            updateStatus(skills.waiting()?(skills.pending()==SkillVision.Kind.GOLD?"CHỜ CẦU VÀNG":
+                    skills.pending()==SkillVision.Kind.RAINBOW?"CHỜ COMBO":"CHỜ KỸ NĂNG"):"KỸ NĂNG OK");
             scheduleFrame(token,FRAME_CHECK_MS);return;
         }
-        if(board==null || !hud && skills.waiting()) {
-            shotGate.observedNoBoard();
-            updateStatus(report);
-            scheduleFrame(token,FRAME_CHECK_MS);
-            return;
+        // Passive effects must not be blocked by CHỜ LƯỢT or missing launcher.
+        // A recognized X2 is dispatched on the first frame, ahead of TIME.
+        if(hud){
+            SkillVision.Icon passive=skills.passive(icons,now);
+            if(passive!=null){performSkill(token,passive,scaleX,scaleY);return;}
         }
-        if(flight){shotGate.observedFlight();updateStatus("BÓNG BAY");scheduleFrame(token,FRAME_CHECK_MS);return;}
+        if(board==null || !hud && skills.waiting()) {
+            shotGate.observedNoBoard();updateStatus(report);scheduleFrame(token,FRAME_CHECK_MS);return;
+        }
+        if(flight){updateStatus("BÓNG BAY");scheduleFrame(token,FRAME_CHECK_MS);return;}
         if(!shotGate.canShoot(board.signature,now)) {
             updateStatus("CHỜ LƯỢT");scheduleFrame(token,FRAME_CHECK_MS);return;
         }
         SkillVision.Icon icon=skills.choose(icons,shot,wildcard,now);
         if(icon!=null){performSkill(token,icon,scaleX,scaleY);return;}
-        // First observation of a usable skill must be rechecked on a fresh
-        // frame, not overtaken by a shot.
         if(skills.confirming()) {updateStatus("KIỂM KỸ NĂNG");scheduleFrame(token,FRAME_CHECK_MS);return;}
         if(shot==null) {updateStatus("CHỜ KHUNG ẢNH");scheduleFrame(token,FRAME_CHECK_MS);return;}
         performTap(token,shot,scaleX,scaleY);
@@ -332,9 +371,9 @@ public final class GameAccessibilityService extends AccessibilityService {
         try{
             boolean sent=dispatchGesture(gesture,new GestureResultCallback(){
                 @Override public void onCompleted(GestureDescription d){if(token==runId && running)scheduleFrame(token,60);}
-                @Override public void onCancelled(GestureDescription d){if(token==runId && running){skills.cancelled(SystemClock.elapsedRealtime());pendingSkill=null;shotGate.skillChanged();scheduleFrame(token,350);}}
+                @Override public void onCancelled(GestureDescription d){if(token==runId && running){skills.cancelled(SystemClock.elapsedRealtime());syncSkills();shotGate.skillChanged();scheduleFrame(token,350);}}
             },main);
-            if(sent){skills.dispatched(icon,SystemClock.elapsedRealtime());pendingSkill=skills.pending();shotGate.skillChanged();updateStatus("SKILL "+icon.kind);}
+            if(sent){skills.dispatched(icon,SystemClock.elapsedRealtime());syncSkills();shotGate.skillChanged();updateStatus("SKILL "+icon.kind);}
             else {updateStatus("SKILL ERR");scheduleFrame(token,350);}
         }catch(Exception e){updateStatus("SKILL ERR");scheduleFrame(token,350);}
     }
@@ -363,7 +402,7 @@ public final class GameAccessibilityService extends AccessibilityService {
             },main);
             if(sent) {
                 shotGate.shotDispatched(shot.stateSignature,SystemClock.elapsedRealtime());
-                skills.fired();armedSkill=null;
+                skills.fired();syncSkills();
                 String routeLabel=shot.bounces>0?"B"+shot.bounces+" ":"";
                 updateStatus(routeLabel+(shot.matched>=3?"POP "+shot.matched:
                         (shot.score>0?"GHÉP CHỜ":"ĐỔI BÓNG")));

@@ -43,7 +43,7 @@ public final class MainActivity extends Activity {
 
         TextView heading=text("BUBBLE PILOT",25,fg,true);
         content.addView(heading);
-        content.addView(text("v0.8.0 • Bắn liên tục • Ưu tiên POP, fallback đổi bóng • Không root",14,muted,false));
+        content.addView(text("v0.9.0 • Bắn liên tục • Ưu tiên POP, fallback đổi bóng • Không root",14,muted,false));
         space(20);
         cardHeader("1. Cấp quyền");
         permissionStatus=text("Đang kiểm tra...",14,fg,false);

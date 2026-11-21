@@ -636,6 +636,52 @@ public final class GameSolver {
         return best;
     }
     public Board detect(int[] pixels,int w,int h) {
+        return detectInternal(pixels,w,h,false);
+    }
+    /** Combo dialog hides the launcher; only the special-skill path uses this. */
+    public Board detectSkillPreview(int[] pixels,int w,int h,int panelTop,Board previous) {
+        int[] masked=pixels.clone();
+        java.util.Arrays.fill(masked,Math.max(0,panelTop)*w,masked.length,0xff285058);
+        Board b=detectInternal(masked,w,h,true);
+        if(b==null)return null;
+        double x=previous==null?w*.50:previous.shooterX;
+        double y=previous==null?h*.76:previous.shooterY;
+        return new Board(w,h,b.cfg,b.balls,' ',b.count,b.signature,x,y,1);
+    }
+    /** Special projectiles may display two colors, which the normal single-
+     * color launcher classifier deliberately rejects. No change to normal play. */
+    public Board detectLoadedSkill(int[] pixels,int w,int h,Board detected,Board previous,char expected,boolean gold){
+        if("ROYGBVP".indexOf(expected)<0)return null;
+        Board b=detected!=null?detected:detectInternal(pixels,w,h,true);
+        if(b==null)return null;
+        double r=b.radius;
+        double cx=previous==null?w*.50:previous.shooterX;
+        double cy=previous==null?h*cfg.launchY:previous.shooterY;
+        int x0=(int)Math.max(w*.36,cx-r*2.5),x1=(int)Math.min(w*.64,cx+r*2.5);
+        int y0=(int)Math.max(h*(cfg.launchY-.080),cy-r*2.0),y1=(int)Math.min(h*(cfg.launchY+.025),cy+r*1.5);
+        double qBest=-1,bx=0,by=0;
+        for(int y=y0;y<=y1;y+=2)for(int x=x0;x<=x1;x+=2){
+            int count=0;
+            for(double[] pos:SAMPLE)if(pixelClass(pix(pixels,w,h,x+pos[0]*r,y+pos[1]*r))==expected)count++;
+            if(count<(gold?2:4))continue;
+            int circ=circularQuality(pixels,w,h,x,y,r);
+            if(circ<6)continue;
+            double goldError=gold?SkillVision.goldError(pixels,w,h,x,y,r):Double.POSITIVE_INFINITY;
+            if(gold && count<6 && goldError>=24)continue;
+            double q=circ*3+count-Math.abs(x-cx)*.08-Math.abs(y-cy)*.12;
+            if(goldError<24)q+=25-goldError;
+            if(q>qBest){qBest=q;bx=x;by=y;}
+        }
+        if(qBest<0)return null;
+        return new Board(w,h,b.cfg,b.balls,expected,b.count,b.signature,bx,by,.85);
+    }
+    /** Reuse the unchanged normal route planner for one explicitly chosen color. */
+    public Shot bestSkillColor(Board b,char color){
+        if(b==null || "ROYGBVP".indexOf(color)<0)return null;
+        return bestShot(new Board(b.width,b.height,b.cfg,b.balls,color,b.count,b.signature,b.shooterX,b.shooterY,b.shooterConfidence));
+    }
+    static char skillPixelColor(int rgb){return pixelClass(rgb);}
+    private Board detectInternal(int[] pixels,int w,int h,boolean preview) {
         if(pixels==null || w<180 || h<350 || pixels.length!=w*h) {
             diagnosis="ẢNH KHÔNG HỢP LỆ";return null;
         }
@@ -703,6 +749,7 @@ public final class GameSolver {
         if(result.count<7 && result.ceilingRow>1) {
             diagnosis="ĐANG CẬP NHẬT LƯỚI";return null;
         }
+        if(preview)return result;
         if(result.shooter==' ') {diagnosis="CHƯA CÓ BÓNG SẴN SÀNG";return null;}
         if(result.shooter=='W' && !allowSpecialLauncher) {diagnosis="BÓNG ĐẶC BIỆT";return null;}
         if(result.shooterConfidence<.80) {
