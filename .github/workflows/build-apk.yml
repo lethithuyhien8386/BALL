@@ -1,4 +1,4 @@
-name: Build and verify Bubble Pilot Astra APK
+name: Build and verify Bubble Pilot Astra v0.7 APK
 
 on:
   workflow_dispatch:
@@ -36,7 +36,7 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Unit tests for pixel detection and repeated shots
+      - name: Unit tests for pixel detection and trajectory occlusion, wall rebounds and repeated shots
         run: bash tests/test.sh
 
       - name: Assemble signed DEBUG APK
@@ -48,7 +48,7 @@ jobs:
       - name: Upload installable APK and SHA256 report
         uses: actions/upload-artifact@v4
         with:
-          name: BubblePilot-Astra-APK-Android8plus
+          name: BubblePilot-Astra-Candidate
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/debug/build-report.txt
@@ -67,7 +67,7 @@ jobs:
       - name: Download built APK
         uses: actions/download-artifact@v4
         with:
-          name: BubblePilot-Astra-APK-Android8plus
+          name: BubblePilot-Astra-Candidate
           path: verified-apk
 
       - name: Enable KVM group permissions
@@ -92,3 +92,28 @@ jobs:
             sleep 3
             adb shell pidof com.example.bubblepilot
             echo 'INSTALL & LAUNCH PASS: Bubble Pilot Astra installed and started on Android.' 
+
+  publish-verified:
+    name: Publish APK only after emulator install checks succeed
+    needs: [build, emulator-install-check]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch candidate APK
+        uses: actions/download-artifact@v4
+        with:
+          name: BubblePilot-Astra-Candidate
+          path: verified-apk
+      - name: Confirm candidate APK and report exist
+        run: |
+          test -s verified-apk/app-debug.apk
+          test -s verified-apk/build-report.txt
+          echo 'APK passed compile, signature and Android 9/11 installation smoke tests.'
+      - name: Publish install-checked APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BubblePilot-Astra-v0.7-APK-InstallChecked
+          path: |
+            verified-apk/app-debug.apk
+            verified-apk/build-report.txt
+          if-no-files-found: error
+          retention-days: 14
