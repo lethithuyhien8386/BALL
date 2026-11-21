@@ -10,6 +10,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.hardware.HardwareBuffer;
 import android.os.Handler;
+import android.os.Build;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.Settings;
@@ -162,6 +163,25 @@ public final class GameAccessibilityService extends AccessibilityService {
     private void captureFrame(int token) {
         if(screenshotPending){scheduleFrame(token,FRAME_CHECK_MS);return;}
         screenshotPending=true;
+        if(Build.VERSION.SDK_INT<Build.VERSION_CODES.R) {
+            LegacyProjectionService legacy=LegacyProjectionService.get();
+            if(legacy==null || !LegacyProjectionService.isReady()) {
+                screenshotPending=false;
+                updateStatus("CAPTURE OFF");
+                scheduleFrame(token,800);
+                return;
+            }
+            visionWorker.execute(()->{
+                Bitmap bitmap=legacy.acquireBitmap();
+                if(bitmap==null) {
+                    main.post(()->{
+                        screenshotPending=false;
+                        if(token==runId && running)scheduleFrame(token,220);
+                    });
+                } else processBitmap(bitmap,token);
+            });
+            return;
+        }
         try {
             takeScreenshot(Display.DEFAULT_DISPLAY,getMainExecutor(),new TakeScreenshotCallback(){
                 @Override public void onSuccess(ScreenshotResult result) {
@@ -178,26 +198,7 @@ public final class GameAccessibilityService extends AccessibilityService {
                         return;
                     }
                     final Bitmap bitmap=copy;
-                    visionWorker.execute(()->{
-                        try {
-                            int w=bitmap.getWidth(),h=bitmap.getHeight();
-                            int[] rgba=new int[w*h];
-                            bitmap.getPixels(rgba,0,w,0,0,w,h);
-                            GameSolver planner=solver();
-                            GameSolver.Board board=planner.detect(rgba,w,h);
-                            GameSolver.Shot move=planner.bestShot(board);
-                            main.post(()->{
-                                screenshotPending=false;
-                                if(token==runId && running)onFrame(token,bitmap,board,move);
-                                else bitmap.recycle();
-                            });
-                        } catch(Exception error) {
-                            main.post(()->{
-                                bitmap.recycle();screenshotPending=false;
-                                if(token==runId && running) {updateStatus("VISION ERR");scheduleFrame(token,600);}
-                            });
-                        }
-                    });
+                    visionWorker.execute(()->processBitmap(bitmap,token));
                 }
                 @Override public void onFailure(int code) {
                     screenshotPending=false;
@@ -210,6 +211,26 @@ public final class GameAccessibilityService extends AccessibilityService {
         } catch(Exception e) {
             screenshotPending=false;
             if(token==runId && running) {updateStatus("NO SCREEN");scheduleFrame(token,800);}
+        }
+    }
+    private void processBitmap(Bitmap bitmap,int token) {
+        try {
+            int w=bitmap.getWidth(),h=bitmap.getHeight();
+            int[] rgba=new int[w*h];
+            bitmap.getPixels(rgba,0,w,0,0,w,h);
+            GameSolver planner=solver();
+            GameSolver.Board board=planner.detect(rgba,w,h);
+            GameSolver.Shot move=planner.bestShot(board);
+            main.post(()->{
+                screenshotPending=false;
+                if(token==runId && running)onFrame(token,bitmap,board,move);
+                else bitmap.recycle();
+            });
+        } catch(Exception error) {
+            main.post(()->{
+                bitmap.recycle();screenshotPending=false;
+                if(token==runId && running) {updateStatus("VISION ERR");scheduleFrame(token,600);}
+            });
         }
     }
     private void onFrame(int token,Bitmap image,GameSolver.Board board,GameSolver.Shot shot) {

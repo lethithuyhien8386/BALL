@@ -3,6 +3,9 @@ package com.example.bubblepilot;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Color;
+import android.media.projection.MediaProjectionManager;
+import android.content.Context;
+import android.os.Build;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -20,6 +23,7 @@ import android.widget.Toast;
 
 /** Permission screen + settings screen (plain Android, zero third-party dependencies). */
 public final class MainActivity extends Activity {
+    private static final int CAPTURE_REQUEST = 1007;
     private SecretStore store;
     private LinearLayout content;
     private TextView permissionStatus;
@@ -64,6 +68,13 @@ public final class MainActivity extends Activity {
                 startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION));
             }
         });
+        if(Build.VERSION.SDK_INT<Build.VERSION_CODES.R) {
+            space(7);
+            content.addView(text("Android 8–10 cần thêm quyền CAPTURE do hệ thống cấp để chụp màn hình game.",12,muted,false));
+            Button capture=button("Cấp quyền CAPTURE (Android 8–10)");
+            content.addView(capture);
+            capture.setOnClickListener(v->requestCapture());
+        }
         space(23);
         cardHeader("2. Cài đặt mô hình AI");
         content.addView(text("Phân tích pixel và tìm điểm số cao nhất chạy trực tiếp trên máy. Astra chỉ hỗ trợ khi điểm dự đoán thấp; bot không chờ API quá lâu.",13,muted,false));
@@ -99,6 +110,9 @@ public final class MainActivity extends Activity {
             if(!saveSettings())return;
             if(!Settings.canDrawOverlays(this)) {
                 toast("Bạn cần cấp quyền FLOAT trước");return;
+            }
+            if(Build.VERSION.SDK_INT<Build.VERSION_CODES.R && !LegacyProjectionService.isReady()) {
+                toast("Android 8–10 cần cấp quyền CAPTURE trước");requestCapture();return;
             }
             GameAccessibilityService service=GameAccessibilityService.get();
             if(service==null) {toast("Bạn cần bật quyền CLICK trong Trợ năng trước");return;}
@@ -157,12 +171,31 @@ public final class MainActivity extends Activity {
             toast("Đã lưu cấu hình");return true;
         } catch(Exception e) {toast("Lỗi: "+e.getMessage());return false;}
     }
+    private void requestCapture() {
+        MediaProjectionManager manager=(MediaProjectionManager)getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+        if(manager==null) {toast("Thiết bị không hỗ trợ chụp màn hình");return;}
+        startActivityForResult(manager.createScreenCaptureIntent(), CAPTURE_REQUEST);
+    }
+    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data) {
+        super.onActivityResult(requestCode,resultCode,data);
+        if(requestCode==CAPTURE_REQUEST) {
+            if(resultCode==RESULT_OK && data!=null) {
+                Intent i=new Intent(this,LegacyProjectionService.class);
+                i.putExtra("result_code",resultCode);
+                i.putExtra("result_data",data);
+                startForegroundService(i);
+                toast("Đã cho phép chia sẻ màn hình. Chọn START sau khi cấp CLICK/FLOAT.");
+            } else toast("Bạn chưa cấp quyền chụp màn hình");
+        }
+    }
     private void updateStatus() {
         boolean click=GameAccessibilityService.get()!=null;
         boolean floating=Settings.canDrawOverlays(this);
         if(permissionStatus!=null)permissionStatus.setText(
                 "CLICK: "+(click?"✓ Đã bật":"✗ Chưa bật")+"     FLOAT: "+
-                        (floating?"✓ Đã bật":"✗ Chưa bật"));
+                        (floating?"✓ Đã bật":"✗ Chưa bật")+
+                        (Build.VERSION.SDK_INT<Build.VERSION_CODES.R?
+                                "     CAPTURE: "+(LegacyProjectionService.isReady()?"✓ Đã bật":"✗ Chưa bật"):""));
     }
     private void toast(String message) {Toast.makeText(this,message,Toast.LENGTH_LONG).show();}
     @Override public void onResume(){super.onResume();updateStatus();}
