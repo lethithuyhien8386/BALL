@@ -30,3 +30,8 @@ Dự án Android Java (Android 8.0+, minSdk 26) để build APK bằng **GitHub 
 **Giới hạn cần biết**: Test ảnh tĩnh không cho biết chính xác tốc độ/độ chính xác khi chơi trực tiếp. Kết quả POP/drop là ước lượng, luật bóng đặc biệt và vật lý thực tế có thể làm sai điểm. Nếu Android đang hiển thị menu, bóng còn bay hoặc không xác nhận được bóng nòng, app sẽ tạm không chạm để tránh bắn vào sai chỗ; **không có trạng thái dừng chỉ vì `matched=0`**. Không thể cam kết luôn đạt số điểm cao nhất hoặc phản ứng tức thời trên mọi thiết bị.
 
 **Bảo mật**: Xingchi là dịch vụ bên thứ ba, không phải endpoint chính thức của OpenAI. Chỉ nhập key trong ứng dụng và chủ động bật tư vấn Astra nếu tin tưởng dịch vụ; không đưa key lên GitHub.
+
+
+### GitHub Actions verification fix (November 2026)
+
+The APK verifier now reads `versionCode`, `versionName`, `minSdk`, and `applicationId` directly from `app/build.gradle`. This fixes a false CI failure where the app built as v0.7.0 but `scripts/verify-apk.sh` still expected v0.6.0. The application gameplay source is otherwise unchanged.
