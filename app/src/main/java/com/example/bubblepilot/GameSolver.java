@@ -3,13 +3,15 @@ package com.example.bubblepilot;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * Pure Java bubble-shooter vision and trajectory planner. No cloud/API calls.
  *
  * Coordinates are calibrated against the supplied 422x757 reference image.
  * Each captured image is sampled at pixel level; candidate shooting angles
- * is ray-traced, with side-wall rebounds and first-visible-ball occlusion.
+ * is ray-traced, with side-wall rebounds and first-ball collision.
  * Snap positions follow a staggered hexagonal grid. A shot is scored by balls
  * removed in >=3-color clusters plus disconnected balls that subsequently drop.
  *
@@ -39,6 +41,8 @@ public final class GameSolver {
         public double colPitch = .0845;
         public double rowPitch = .0408;
         public double radiusX = .038;
+        // Filled from screen pixels when distinct arena edges are visible.
+        boolean detectedArena = false;
     }
     public static final class Ball {
         public final int row, col;
@@ -62,7 +66,23 @@ public final class GameSolver {
             width=w; height=h; this.cfg=cfg; shooter=shot;count=n;signature=hash;
             radius=w*cfg.radiusX; topY=h*cfg.topY;
             shooterX=w*cfg.launchX; shooterY=h*cfg.launchY;
-            leftWall=w*cfg.boardLeft+radius;rightWall=w*cfg.boardRight-radius;
+            // The arena shifts between game scenes. A fixed fraction of screen
+            // width placed the left rebound wall about 13 px too far left in
+            // the second supplied screenshot. Estimate ball-center wall limits
+            // from the calibrated staggered grid; keep a safe fallback.
+            double gridLeft=w*cfg.oddX-radius*.24;
+            double gridRight=w*(cfg.oddX+9*cfg.colPitch)+radius*.24;
+            double fallbackLeft=w*cfg.boardLeft+radius;
+            double fallbackRight=w*cfg.boardRight-radius;
+            if(cfg.detectedArena && fallbackLeft>radius && fallbackRight<w-radius &&
+               fallbackRight-fallbackLeft>w*.62) {
+                // Exact translucent arena edge measured across thousands of
+                // screen pixels, then inset by the projectile radius.
+                leftWall=fallbackLeft;rightWall=fallbackRight;
+            } else if(gridRight-gridLeft>w*.62 && gridRight-gridLeft<w*.94 &&
+                      gridLeft>radius*.6 && gridRight<w-radius*.6) {
+                leftWall=gridLeft;rightWall=gridRight;
+            } else {leftWall=fallbackLeft;rightWall=fallbackRight;}
             for (int r=0;r<ROWS;r++) System.arraycopy(found[r],0,balls[r],0,COLS);
         }
         double gridX(int r,int c) {
@@ -72,20 +92,32 @@ public final class GameSolver {
         boolean exists(int r,int c) {return r>=0 && r<ROWS && c>=0 && c<((r&1)==0?9:10);}
     }
     public static final class Shot {
-        public final int tapX, tapY;
-        public final double angle, score;
-        public final int matched, dropped;
+        public final int tapX,tapY;
+        public final double angle,score;
+        public final int matched,dropped;
         public final long stateSignature;
-        Shot(int x,int y,double angle,double score,int matched,int dropped,long sig) {
+        public final int bounces,hitRow,hitCol,snapRow,snapCol;
+        /** 0 to 1: portion of simulated small tap/wall perturbations retaining the landing cell. */
+        public final double reliability;
+        Shot(int x,int y,double angle,double score,int matched,int dropped,long sig,
+             int bounces,int hitRow,int hitCol,int snapRow,int snapCol,double reliability) {
             tapX=x;tapY=y;this.angle=angle;this.score=score;
             this.matched=matched;this.dropped=dropped;stateSignature=sig;
+            this.bounces=bounces;this.hitRow=hitRow;this.hitCol=hitCol;
+            this.snapRow=snapRow;this.snapCol=snapCol;this.reliability=reliability;
+        }
+        Shot rerank(double newScore,double stability) {
+            return new Shot(tapX,tapY,angle,newScore,matched,dropped,stateSignature,
+                    bounces,hitRow,hitCol,snapRow,snapCol,stability);
         }
     }
     private static final class Contact {
-        double x,y, traveled;
-        Ball target;
-        Contact(double x,double y,double d,Ball target) {
+        final double x,y,traveled,dx,dy;
+        final int bounces;
+        final Ball target;
+        Contact(double x,double y,double d,Ball target,int bounces,double dx,double dy) {
             this.x=x;this.y=y;traveled=d;this.target=target;
+            this.bounces=bounces;this.dx=dx;this.dy=dy;
         }
     }
     private static final class Placement {
@@ -124,7 +156,7 @@ public final class GameSolver {
         b.topY=a.topY;b.launchY=a.launchY;b.launchX=a.launchX;
         b.boardLeft=a.boardLeft;b.boardRight=a.boardRight;
         b.oddX=a.oddX;b.colPitch=a.colPitch;b.rowPitch=a.rowPitch;
-        b.radiusX=a.radiusX;
+        b.radiusX=a.radiusX;b.detectedArena=a.detectedArena;
         return b;
     }
 
@@ -286,8 +318,49 @@ public final class GameSolver {
                     }
         return c;
     }
+    /**
+     * Detect the actual side walls from their vertical pixel edges in the
+     * empty middle of the playfield. In the supplied screenshots the visible
+     * edge is x=23/386 (original) and x=38/401 (shifted scene). This is much
+     * more accurate for bank shots than assuming the board always occupies a
+     * fixed percentage of the display width.
+     */
+    private static double[] detectArenaEdges(int[] pixels,int w,int h,double radius) {
+        int y0=(int)(h*.45),y1=(int)(h*.70),step=Math.max(2,h/220);
+        int[] boundaries={Math.max(1,(int)(w*.025)),Math.min(w-3,(int)(w*.19)),
+                          Math.max(1,(int)(w*.77)),Math.min(w-3,(int)(w*.986))};
+        int[] bestX={-1,-1};double[] bestMean={0,0};
+        for(int side=0;side<2;side++) {
+            for(int x=boundaries[side*2];x<=boundaries[side*2+1];x++) {
+                long total=0;int n=0;
+                for(int y=y0;y<y1;y+=step) {
+                    total+=difference(pixels[y*w+x],pixels[y*w+x+1]);n++;
+                }
+                double avg=total/(3.0*Math.max(1,n));
+                if(avg>bestMean[side]) {bestMean[side]=avg;bestX[side]=x;}
+            }
+        }
+        if(bestX[0]<0 || bestX[1]<0 || bestMean[0]<12 || bestMean[1]<12 ||
+           bestX[1]-bestX[0]<w*.63 || bestX[1]-bestX[0]>w*.95 ||
+           bestX[0]+radius>=bestX[1]-radius)return null;
+        return new double[]{bestX[0],bestX[1]};
+    }
     private static Board detectAt(int[] pixels,int w,int h,Configuration c) {
         double radius=w*c.radiusX;
+        Configuration measured=copy(c);
+        double[] walls=detectArenaEdges(pixels,w,h,radius);
+        if(walls!=null) {
+            // Validate detected boundaries against the calibrated ball grid;
+            // avoid locking onto a bright vertical decorative stripe.
+            double leftCell=w*c.oddX;
+            double rightCell=w*(c.oddX+9*c.colPitch);
+            if(Math.abs(walls[0]+radius-leftCell)<radius*2.4 &&
+               Math.abs(walls[1]-radius-rightCell)<radius*2.4) {
+                measured.boardLeft=walls[0]/w;
+                measured.boardRight=walls[1]/w;
+                measured.detectedArena=true;
+            }
+        }
         Ball[][] found=new Ball[ROWS][COLS];
         int count=0, emptyRows=0;
         long hash=0xcbf29ce484222325L;
@@ -320,7 +393,7 @@ public final class GameSolver {
         }
         char shooter=patchColor(pixels,w,h,w*c.launchX,h*c.launchY,radius);
         hash^=shooter;hash*=0x100000001b3L;
-        return new Board(w,h,c,found,shooter,count,hash);
+        return new Board(w,h,measured,found,shooter,count,hash);
     }
     public Board detect(int[] pixels,int w,int h) {
         if(pixels==null || w<180 || h<350 || pixels.length!=w*h) {
@@ -349,40 +422,54 @@ public final class GameSolver {
         return result;
     }
 
-    private static Contact trace(Board board, List<Ball> all, double angle) {
+    /**
+     * First-contact billiard physics: test EVERY bubble on each unobstructed
+     * ray segment before the next wall. Bounce only if the wall wins; never
+     * credit a cluster behind a nearer blocker, including white special balls.
+     * Radius and wall shifts are varied in finalist stability checks.
+     */
+    private static Contact trace(Board board,List<Ball> all,double angle,
+                                 double wallShift,double radiusShift) {
         double dx=Math.sin(Math.toRadians(angle)),dy=-Math.cos(Math.toRadians(angle));
+        if(dy>=-1e-6)return null;
         double x=board.shooterX,y=board.shooterY,total=0;
-        double effectiveR=board.radius*2.06;
-        for(int bounced=0;bounced<8;bounced++) {
-            double tWall=Double.POSITIVE_INFINITY;
-            if(dx>1e-7)tWall=(board.rightWall-x)/dx;
-            else if(dx < -1e-7)tWall=(board.leftWall-x)/dx;
-            double tTop=(board.topY-y)/dy;
-            if(tTop<0) return null;
-            double limit=Math.min(tTop,tWall);
-            if(limit<0) return null;
-            double best=limit;
-            Ball target=null;
-            for(Ball ball : all) {
+        double left=board.leftWall+wallShift, right=board.rightWall-wallShift;
+        if(right-left<board.radius*7 || x<=left || x>=right)return null;
+        double effectiveR=board.radius*2.0+radiusShift;
+        if(effectiveR<=board.radius)return null;
+        for(int bounced=0;bounced<=3;bounced++) {
+            double wallT=Double.POSITIVE_INFINITY;
+            if(dx>1e-8)wallT=(right-x)/dx;
+            else if(dx< -1e-8)wallT=(left-x)/dx;
+            double topT=(board.topY-y)/dy;
+            if(topT< -1e-6 || wallT< -1e-6)return null;
+            double boundaryT=Math.min(topT,wallT);
+            Ball first=null;
+            double hitT=boundaryT;
+            for(Ball ball:all) {
                 double qx=x-ball.x,qy=y-ball.y;
-                double b=2*(qx*dx+qy*dy);
+                double b=qx*dx+qy*dy;
                 double c=qx*qx+qy*qy-effectiveR*effectiveR;
-                double disc=b*b-4*c;
-                if(disc<0)continue;
-                double t=(-b-Math.sqrt(disc))*.5;
-                if(t>=-1e-6 && t<best) { best=Math.max(0,t);target=ball; }
+                double det=b*b-c;
+                if(det<0)continue;
+                // When starting inside a collision radius, stop immediately.
+                // Otherwise take the ENTRY intersection, never the exit.
+                double t=c<=0?0:-b-Math.sqrt(det);
+                if(t>=-1e-7 && t<hitT-1e-8) {hitT=Math.max(0,t);first=ball;}
             }
-            double hitX=x+best*dx,hitY=y+best*dy;
-            if(target!=null) return new Contact(hitX,hitY,total+best,target);
-            total+=limit;
-            if(tTop<=tWall) return new Contact(hitX,board.topY,total,null);
-            x=hitX;y=hitY;
-            dx=-dx;
-            x=Math.max(board.leftWall+1e-4,Math.min(board.rightWall-1e-4,x));
+            double hitX=x+dx*hitT,hitY=y+dy*hitT;
+            if(first!=null)
+                return new Contact(hitX,hitY,total+hitT,first,bounced,dx,dy);
+            if(topT<=wallT+1e-7)
+                return new Contact(hitX,board.topY,total+topT,null,bounced,dx,dy);
+            if(bounced>=3)return null;
+            total+=wallT;
+            // Move inside the reflecting wall to avoid numeric zero-time loops.
+            x=hitX; y=hitY; dx=-dx;
+            x=Math.max(left+1e-5,Math.min(right-1e-5,x));
         }
         return null;
     }
-
     private static List<Ball> asList(Board b) {
         ArrayList<Ball> out=new ArrayList<>();
         for(Ball[] row:b.balls) for(Ball ball:row)if(ball!=null)out.add(ball);
@@ -395,23 +482,34 @@ public final class GameSolver {
     }
     private static Placement snap(Board b,Contact contact) {
         Placement best=null;
+        // The old 0.90*pitch tolerance could attach behind the blocker.
+        // A real snap site is within roughly 0.5 pitch of the collision point.
+        final double reach=b.width*b.cfg.colPitch*.56;
         for(int r=0;r<ROWS;r++) {
             if(b.gridY(r)>b.shooterY-b.radius*3)break;
             for(int c=0;c<COLS;c++) {
                 if(!b.exists(r,c) || b.balls[r][c]!=null)continue;
                 double x=b.gridX(r,c),y=b.gridY(r);
                 double dist=Math.hypot(x-contact.x,y-contact.y);
-                if(dist>b.width*b.cfg.colPitch*.90)continue;
+                if(dist>reach)continue;
                 boolean connected=(r==0);
-                if(!connected) for(int rr=Math.max(0,r-1);rr<=Math.min(ROWS-1,r+1);rr++) {
+                if(!connected)for(int rr=Math.max(0,r-1);rr<=Math.min(ROWS-1,r+1) && !connected;rr++) {
                     for(int cc=Math.max(0,c-1);cc<=Math.min(COLS-1,c+1);cc++) {
-                        if(b.balls[rr][cc]!=null && adjacent(b,r,c,rr,cc))connected=true;
+                        if(b.balls[rr][cc]!=null && adjacent(b,r,c,rr,cc)) {
+                            connected=true;break;
+                        }
                     }
                 }
                 if(!connected)continue;
-                // Contact should be close to the collided visible ball.
-                if(contact.target!=null && !adjacent(b,r,c,contact.target.row,contact.target.col)) continue;
-                if(best==null || dist<best.distance) best=new Placement(r,c,dist);
+                if(contact.target!=null) {
+                    if(!adjacent(b,r,c,contact.target.row,contact.target.col))continue;
+                    // Attach on the incoming side of the first-hit ball, not
+                    // somewhere past it or on the opposite side.
+                    double rx=x-contact.target.x,ry=y-contact.target.y;
+                    if(rx*(contact.x-contact.target.x)+
+                       ry*(contact.y-contact.target.y)<0.20*b.radius*b.radius)continue;
+                }
+                if(best==null || dist<best.distance)best=new Placement(r,c,dist);
             }
         }
         return best;
@@ -425,6 +523,23 @@ public final class GameSolver {
             }
         }
         return list;
+    }
+    private static boolean[][] connectedToCeiling(Board b,char[][] cells) {
+        boolean[][] connected=new boolean[ROWS][COLS];
+        ArrayDeque<int[]> queue=new ArrayDeque<>();
+        for(int col=0;col<COLS;col++)if(b.exists(0,col) && cells[0][col]!=' ') {
+            connected[0][col]=true;queue.add(new int[]{0,col});
+        }
+        while(!queue.isEmpty()) {
+            int[] at=queue.removeFirst();
+            for(int[] next:neighbors(b,at[0],at[1])) {
+                int r=next[0],c=next[1];
+                if(cells[r][c]!=' ' && !connected[r][c]) {
+                    connected[r][c]=true;queue.add(next);
+                }
+            }
+        }
+        return connected;
     }
     private static Score evaluate(Board b,Placement p) {
         char[][] cells=new char[ROWS][COLS];
@@ -450,6 +565,10 @@ public final class GameSolver {
         }
         int matched=matching.size();
         if(matched>=3) {
+            // Count dropped bubbles only if they were connected to the ceiling
+            // BEFORE this pop. Otherwise detached animation frames or detector
+            // noise could be credited as a fictitious bonus.
+            boolean[][] before=connectedToCeiling(b,cells);
             for(int[] c:matching)cells[c[0]][c[1]]=' ';
             seen=new boolean[ROWS][COLS];
             queue.clear();
@@ -467,7 +586,7 @@ public final class GameSolver {
             }
             int dropped=0, dropPixels=0;
             for(int r=0;r<ROWS;r++)for(int c=0;c<COLS;c++) {
-                if(cells[r][c]!=' ' && !seen[r][c]) {
+                if(cells[r][c]!=' ' && before[r][c] && !seen[r][c]) {
                     dropped++;
                     Ball bb=b.balls[r][c]; if(bb!=null)dropPixels+=bb.visiblePixels;
                 }
@@ -479,41 +598,159 @@ public final class GameSolver {
         return new Score(same*20 - p.row*1.7 - 18,0,0);
     }
     private static Shot shotAtAngle(Board b,List<Ball> all,double angle) {
+        return shotAtAngle(b,all,angle,0,0);
+    }
+    private static Shot shotAtAngle(Board b,List<Ball> all,double angle,
+                                    double wallShift,double radiusShift) {
         if(Math.abs(angle)>77.5)return null;
-        Contact contact=trace(b,all,angle);
-        if(contact==null)return null;
-        Placement place=snap(b,contact);
-        if(place==null)return null;
-        Score score=evaluate(b,place);
-        // Prefer maximum points, then shorter and simpler trajectories on ties.
-        double finalScore=score.score-contact.traveled*.001-Math.abs(angle)*.002;
+        // DispatchGesture uses whole screen pixels. Quantize FIRST, then
+        // trace the actual resulting angle, not the ideal sub-pixel angle.
         double aiming=b.width*.4265;
         int x=(int)Math.round(b.shooterX+Math.sin(Math.toRadians(angle))*aiming);
         int y=(int)Math.round(b.shooterY-Math.cos(Math.toRadians(angle))*aiming);
         x=Math.max(2,Math.min(b.width-3,x));
         y=Math.max((int)(b.height*.10),Math.min(b.height-3,y));
-        return new Shot(x,y,angle,finalScore,score.matched,score.dropped,b.signature);
+        double realAngle=Math.toDegrees(Math.atan2(x-b.shooterX,b.shooterY-y));
+        if(Math.abs(realAngle)>77.5)return null;
+        Contact contact=trace(b,all,realAngle,wallShift,radiusShift);
+        if(contact==null)return null;
+        Placement place=snap(b,contact);
+        if(place==null)return null;
+        Score score=evaluate(b,place);
+        // Score only the actual FIRST contact, with a small risk penalty for
+        // rebounds, high-angle shots, and imprecise snap distances.
+        double finalScore=score.score-contact.traveled*.001-
+                contact.bounces*2.2-Math.abs(realAngle)*.007-place.distance*.22;
+        return new Shot(x,y,realAngle,finalScore,score.matched,score.dropped,
+                b.signature,contact.bounces,
+                contact.target==null?-1:contact.target.row,
+                contact.target==null?-1:contact.target.col,
+                place.row,place.col,1);
     }
-    /** Validate and score an Astra suggestion using the same local collision physics. */
+    /** Recheck Astra targets with identical collision, wall and snap physics. */
     public Shot shotAtTap(Board b,int x,int y) {
         if(b==null || x<2 || x>=b.width-2 || y<2 || y>=b.shooterY-15)return null;
         double angle=Math.toDegrees(Math.atan2(x-b.shooterX,b.shooterY-y));
         return shotAtAngle(b,asList(b),angle);
     }
+
+    /**
+     * A route has to survive small perturbations in aim, wall position and
+     * actual bubble size. A pixel-perfect but fragile theoretical pop must
+     * lose to a nearly as valuable clear, repeatable shot.
+     */
+    private static Shot stabilityRank(Board b,List<Ball> balls,Shot candidate) {
+        final double[] offsets={-.34,-.17,.17,.34};
+        double worst=candidate.score;
+        int sameCell=0,total=0;
+        for(double offset:offsets) {
+            Shot neighbor=shotAtAngle(b,balls,candidate.angle+offset);
+            total++;
+            if(neighbor!=null && neighbor.snapRow==candidate.snapRow &&
+               neighbor.snapCol==candidate.snapCol)sameCell++;
+            double sample=neighbor==null?-75:neighbor.score;
+            worst=Math.min(worst,sample);
+        }
+        // A few pixels of wall placement uncertainty matters most for banks.
+        if(candidate.bounces>0)for(double shift:new double[]{-2,2}) {
+            Shot variant=shotAtAngle(b,balls,candidate.angle,shift,0);
+            total++;
+            if(variant!=null && variant.snapRow==candidate.snapRow &&
+               variant.snapCol==candidate.snapCol)sameCell++;
+            worst=Math.min(worst,variant==null?-75:variant.score);
+        }
+        // Bubble radii can be slightly different from their image halo.
+        for(double shift:new double[]{-.9,.9}) {
+            Shot variant=shotAtAngle(b,balls,candidate.angle,0,shift);
+            total++;
+            if(variant!=null && variant.snapRow==candidate.snapRow &&
+               variant.snapCol==candidate.snapCol)sameCell++;
+            worst=Math.min(worst,variant==null?-75:variant.score);
+        }
+        double confidence=sameCell/(double)Math.max(1,total);
+        // Trust the central path while strongly downgrading brittle shots.
+        double robustScore=.60*candidate.score+.40*worst;
+        robustScore-=(1-confidence)*Math.max(8,Math.max(0,candidate.score)*.06);
+        return candidate.rerank(robustScore,confidence);
+    }
+    private static void keepTop(List<Shot> finalists,Shot shot,int max) {
+        if(shot==null)return;
+        // Keep different trajectories, not 24 near-identical angles.
+        for(int i=0;i<finalists.size();i++) {
+            Shot old=finalists.get(i);
+            if(old.snapRow==shot.snapRow && old.snapCol==shot.snapCol &&
+               old.bounces==shot.bounces &&
+               Math.signum(old.angle)==Math.signum(shot.angle) &&
+               Math.abs(old.angle-shot.angle)<.9) {
+                if(shot.score>old.score)finalists.set(i,shot);
+                return;
+            }
+        }
+        if(finalists.size()<max) {finalists.add(shot);return;}
+        int worstAt=0;
+        for(int i=1;i<finalists.size();i++)
+            if(finalists.get(i).score<finalists.get(worstAt).score)worstAt=i;
+        if(shot.score>finalists.get(worstAt).score)finalists.set(worstAt,shot);
+    }
+    private static void consider(Board b,List<Ball> all,double angle,
+                                 Set<Integer> used,List<Shot> finalists) {
+        if(Math.abs(angle)>77.5)return;
+        double aim=b.width*.4265;
+        int x=(int)Math.round(b.shooterX+Math.sin(Math.toRadians(angle))*aim);
+        int y=(int)Math.round(b.shooterY-Math.cos(Math.toRadians(angle))*aim);
+        x=Math.max(2,Math.min(b.width-3,x));
+        y=Math.max((int)(b.height*.10),Math.min(b.height-3,y));
+        int key=x*65536+y;
+        if(!used.add(key))return;
+        keepTop(finalists,shotAtAngle(b,all,angle),28);
+    }
+    /**
+     * Mirror each empty reachable cell across 1, 2, or 3 reflected wall
+     * segments. These image-space directions include slim bank-shot corridors
+     * that a coarse uniform scan can miss. EVERY candidate is still ray-traced
+     * from the launcher and is rejected if an earlier bubble obstructs it.
+     */
     public Shot bestShot(Board b) {
         if(b==null)return null;
         List<Ball> all=asList(b);
-        Shot best=null;
-        for(int a=-155;a<=155;a++) {  // coarse search, half-degree steps
-            Shot candidate=shotAtAngle(b,all,a*.5);
-            if(candidate!=null && (best==null || candidate.score>best.score))best=candidate;
+        List<Shot> finalists=new ArrayList<>(28);
+        Set<Integer> used=new HashSet<>();
+        for(int a=-155;a<=155;a++)
+            consider(b,all,a*.5,used,finalists);
+        final double left=b.leftWall,span=b.rightWall-b.leftWall;
+        for(int r=0;r<ROWS;r++) {
+            double cy=b.gridY(r);
+            if(cy>b.shooterY-3*b.radius)break;
+            for(int c=0;c<COLS;c++) {
+                if(!b.exists(r,c) || b.balls[r][c]!=null)continue;
+                boolean reachable=(r==0);
+                if(!reachable)for(int rr=Math.max(0,r-1);rr<=Math.min(ROWS-1,r+1) && !reachable;rr++)
+                    for(int cc=Math.max(0,c-1);cc<=Math.min(COLS-1,c+1);cc++)
+                        if(b.balls[rr][cc]!=null && adjacent(b,r,c,rr,cc)) {
+                            reachable=true;break;
+                        }
+                if(!reachable)continue;
+                double local=b.gridX(r,c)-left;
+                for(int tile=-3;tile<=3;tile++) {
+                    double virtualX=left+((tile&1)==0?tile*span+local:
+                                         (tile+1)*span-local);
+                    double angle=Math.toDegrees(Math.atan2(virtualX-b.shooterX,
+                                                          b.shooterY-cy));
+                    for(double delta:new double[]{-.33,0,.33})
+                        consider(b,all,angle+delta,used,finalists);
+                }
+            }
         }
-        if(best==null)return null;
-        // Subpixel aiming refinement around the best trajectory.
-        double coarse=best.angle;
-        for(int n=-5;n<=5;n++) {
-            Shot candidate=shotAtAngle(b,all,coarse+n*.1);
-            if(candidate!=null && candidate.score>best.score)best=candidate;
+        if(finalists.isEmpty())return null;
+        // Fine refinement around ALL promising distinct routes, not just the
+        // first coarse winner. This includes reflections on either wall.
+        ArrayList<Shot> initial=new ArrayList<>(finalists);
+        for(Shot shot:initial)for(double d:new double[]{-.30,-.15,.15,.30})
+            consider(b,all,shot.angle+d,used,finalists);
+        Shot best=null;
+        for(Shot candidate:finalists) {
+            Shot ranked=stabilityRank(b,all,candidate);
+            if(best==null || ranked.score>best.score)best=ranked;
         }
         return best;
     }

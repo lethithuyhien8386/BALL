@@ -1,59 +1,38 @@
-# BubblePilot Astra v0.4.0 — Android/GitHub source
+# BubblePilot Astra v0.5.0 — chính xác đường bay + bật tường
 
-## Why the previous build showed “CHỜ BÓNG”
+Mã nguồn Android để tự build APK trên GitHub Actions. **Không phải APK đã biên dịch.**
 
-The earlier image classifier only recognized red, orange and green. The second game screenshot contains purple, cyan/blue and a white special bubble, and the entire board begins lower on the screen than in the first image. The detector therefore returned an empty result and the bot did not tap. **v0.4 fixes the recognizer and automatically fits the grid to the screenshot.** This is a source-code release, not a prebuilt APK. A small (~34 KB) Java APK is not inherently invalid: the remote Astra model is not bundled in the APK.
+## Sửa lỗi v0.4
 
-## Build on GitHub
+1. **Không nhắm xuyên bóng chắn:** mỗi góc bắn được mô phỏng bằng tia bay từ bóng ở nòng, kiểm tra va chạm với **mọi bóng trên từng đoạn**. Bóng gần nhất chặn đường trước cả mục tiêu điểm cao, kể cả bóng trắng. Chỉ tính điểm nơi bóng thật sự va chạm rồi ghép vào lưới.
+2. **Tự đo mép tường qua pixel:** đọc hàng nghìn pixel dọc hai mép sân ở vùng giữa màn hình, tìm sự khác biệt màu giữa trong/ngoài sân. Với hai ảnh mẫu, nhận được mép x=23/386 (ảnh 422 px) và x=38/401 (ảnh 441 px); tâm bóng sẽ dội khi chạm mép sân trừ bán kính bóng. Khi không thấy đường biên đủ rõ thì dùng giới hạn suy ra từ lưới làm dự phòng.
+3. **Nước bắn nảy tường 1–3 lần:** xét góc bắn trực tiếp và góc suy ra từ các ô ghép tiềm năng bằng cách phản chiếu mục tiêu qua tường. Tia bắn được mô phỏng thực chứ không chỉ dùng khoảng cách đường thẳng để chấm điểm. Chọn kết quả có giá trị mô phỏng cao nhất sau khi giảm điểm những đường quá nhạy với sai số.
+4. **Ghép ô sát đúng điểm chạm:** không còn cho ghép vào ô cách quá xa hoặc nằm phía sau quả bóng chắn. Làm tròn tọa độ chạm **trước** khi tính va chạm, tương ứng với thao tác Android thực tế.
+5. **Chấm điểm bóng rơi hợp lý hơn:** chỉ cộng bóng thật sự rơi khi trước phát bắn chúng vẫn còn nối với trần, tránh điểm ảo.
+6. **Kiểm tra độ ổn định:** thử sai lệch nhỏ của góc bắn (±0.17°, ±0.34°), vị trí mép tường (±2 px) và kích thước bóng (±0.9 px); ưu tiên quỹ đạo ít nhạy với các sai số này.
 
-1. **Extract** the ZIP and upload all its contents to the root of your GitHub repository, including the hidden `.github` directory. Replace older source files; do not leave two workflows building different versions.
-2. Open **Actions > Build and verify Bubble Pilot Astra v0.4 APK > Run workflow**.
-3. Wait for the green `build` job **and** both green `emulator-install-check` jobs (Android 9/API 28 and Android 11/API 30), then the green `publish-verified` job.
-4. Download the **BubblePilot-Astra-v0.4-APK-InstallChecked** artifact. Extract the artifact ZIP and install **app-debug.apk**. The artifact ZIP itself is not an APK.
-5. If the emulator job has an infrastructure/KVM problem, the separately named `BubblePilot-Astra-Candidate` artifact may exist, but it is **NOT** marked install-checked. Inspect the logs before treating it as verified.
+Không đổi cấu hình trước: `gpt-6-astra`, `https://api.xingchiapi.com/v1`, lưu key mã hóa bằng Android Keystore, CLICK/Accessibility, FLOAT, thanh nổi ▶ / ■ / ×, chạy tiếp khi có bóng mới. Bản mới hiển thị `B1 POP 3` hoặc `B2 AIM ...` khi cú bắn có nảy tường.
 
-Build uses JDK 17, Gradle 8.9, AGP 8.7.3 and compile SDK 35. The debug APK is signed by Gradle and structurally checked for its DEX, manifest, signature, and alignment. The workflow then runs Android emulator install/start tests. These CI tests have **not been executed in the current environment** because it has no Android SDK and no external network access.
+## Tạo APK bằng GitHub
 
-## Run on Android 8.0+
+1. Giải nén ZIP, đưa **toàn bộ nội dung** lên thư mục gốc GitHub repository (kể cả thư mục ẩn `.github`). Gỡ workflow phiên bản cũ để tránh tải nhầm artifact.
+2. Vào **Actions → Build and verify Bubble Pilot Astra v0.5 APK → Run workflow** (hoặc push lên nhánh `main`).
+3. Workflow chạy kiểm thử thuần Java, build `app-debug.apk`, kiểm tra ZIP/APK signature/DEX/manifest và thử cài, khởi động trên máy ảo Android 9 và 11.
+4. Chỉ sau khi `publish-verified` xanh mới tải artifact **BubblePilot-Astra-v0.5-APK-InstallChecked**, giải nén và cài `app-debug.apk`.
+5. Mở app để kiểm tra `v0.5.0`, cấp quyền CLICK và FLOAT. Android 8–10 còn cần quyền CAPTURE. Mở game, bật thanh nổi và nhấn ▶.
 
-1. Uninstall the older BubblePilot if Android refuses an update due to a different debug signing key. This clears app settings/API key.
-2. Open Bubble Pilot v0.4.0; grant **CLICK** (Android Accessibility Service) and **FLOAT** (Display over other apps). On Android 8–10 also grant **CAPTURE** (MediaProjection) using the button and system prompt.
-3. Under settings, the model name is **gpt-6-astra**, endpoint is **https://api.xingchiapi.com/v1**, and key is stored encrypted on the phone (Android Keystore). Enter only a key you trust with that third-party provider. You can run local pixel detection without entering a key.
-4. Tap **LƯU CÀI ĐẶT**, then **START — HIỆN THANH NỔI**, switch to the game, press **▶** to start. Move the bar by dragging **⠿**. Press **■** to stop or **×** to close.
-5. When recognition succeeds, the app chooses a trajectory and sends an Android Accessibility tap. Afterward it monitors for a changed board and two stable frames before tapping again.
+**Nếu Android từ chối cập nhật app:** các workflow GitHub sử dụng debug signing key có thể khác giữa những lượt build, nên bản APK mới có thể không cập nhật đè lên bản cũ. Bạn có thể gỡ bản cũ rồi cài bản mới, nhưng việc này sẽ xóa cấu hình đã lưu và API key; hãy ghi lại endpoint/model/key trước khi gỡ.
 
-### Floating-bar diagnostics
+## Kiểm thử nguồn
 
-- `KHÔNG THẤY LƯỚI`: grid could not be recognized; check screenshot, game orientation and whether the game is visible.
-- `KHÔNG THẤY BÓNG BẮN`: board visible, projectile not recognized; check launcher position.
-- `KHÔNG CÓ GÓC`: no valid simulated path found; may indicate an incompatible game layout.
-- `CHỜ LƯỢT`: board state has not progressed sufficiently or a new frame has not stabilized.
-- `POP N` / `AIM XX`: a simulated tap was successfully handed to Android's gesture dispatcher. This does not prove the game accepted it.
-- `TAP ERR` / `TAP FAIL`: Accessibility rejected/cancelled the tap; check service permissions and game restrictions.
-- `SCREEN [code]` / `CAPTURE OFF`: screenshot permission/system capture issue.
+- Linux/macOS JDK 17+: `bash tests/test.sh`
+- Windows JDK 17+: `tests\test.bat`
+- `TrajectoryPhysicsTest`: bóng chắn đầu tiên, hai chiều bật tường, 2 lần bật tường, và chọn cú bật tường khi tốt hơn đường thẳng.
+- `GeometryRegressionTest`: đo vị trí biên sân từ cả 2 ảnh và tính được đường đi hợp lệ.
+- `NewGamePaletteTest`, `AnalyzeScreenshot`, `ImageScaleTest`, `ShotGateTest`: nhận diện bóng nhiều màu, độ phân giải, trạng thái chờ bóng mới và không bắn lặp.
 
-## What was fixed in v0.4
+### Giới hạn chưa được xác minh
 
-- **Pixel classification** recognizes `R` red, `O` orange, `G` green, `B` cyan/blue, `P` purple, `W` neutral/white special objects (obstacles, not normal color matches). The white type is recognized as a blocker; its actual in-game effect still needs testing.
-- **Automatic geometry fitting** scans plausible first-row coordinates, horizontal/vertical grid spacing and center placement. It rejects straight scenery edges masquerading as circles. Calibrations are reused after a valid frame for faster continuous processing, and reset on Start.
-- **Visible-pixel scoring and occlusion** exclude the circle area covered by neighboring balls. The solver traces candidate paths up to the first impact (including wall rebounds), estimates matching 3+ clusters and falling unsupported bubbles, and refines the best angle. It does not simply click a raw color on the screenshot.
-- **High-resolution scaling** analyzes images over 560 pixels wide at a smaller resolution, and converts tap coordinates back to the real device screen size.
-- **Continuous play** uses an observable board/shooter signature with a 2-frame stability gate after each shot; this avoids repeated taps at an unchanged board. Screenshot cadence is ~115ms plus processing and game animation. Astra can be requested for uncertain local decisions, with a 170ms maximum wait before the local fallback.
-- **Clearer statuses** replace the ambiguous `CHỜ BÓNG` text so detection/gesture failure causes can be distinguished.
+Cơ chế bóng đặc biệt, lực bắn, tường thật của game, luật tính điểm và các thay đổi của màn chơi có thể khác mô hình giả định. Không thể cam kết chọn nước tối ưu tuyệt đối. Thử nghiệm này chỉ kiểm tra bằng ảnh tĩnh và các bàn cờ mô phỏng; **chưa cài, chạy và điều khiển trên thiết bị thực** trong môi trường này vì không có Android SDK. Workflow GitHub có các bước kiểm tra cài đặt nhưng không thay thế việc thử tự động chơi trên game thật.
 
-## Tests completed on the supplied screenshots
-
-`bash tests/test.sh` — passes on JDK 17:
-
-- Original 422×757 image: detects **76 balls**, active projectile **green**, and produces a simulated shot.
-- New 441×791 screenshot (with floating bar): detects **64 balls**, active projectile **purple**, at least one **blue** bubble and the **white special** bubble, and produces a simulated tap near `(281,424)`.
-- The new screenshot does not misidentify the background under the bubble stack as another row of bubbles.
-- 2× resized screenshot test checks the detector remains scale-aware.
-- Continuous-shot state machine test ensures 2 stable frames and prevents duplicate taps on the same unchanged board.
-- On a desktop JDK, the new screenshot took ~80–150ms to calibrate and produce a shot the first time; later same-layout frames took ~5ms for vision and ~2ms for trajectory choice. **These are not Android performance measurements**.
-
-## Important limitations
-
-This is **not** a guarantee of fastest or perfect play. Actual game mechanics (special power-ups, hidden physics, shooting gesture, animation, score multipliers), phone performance, screen overlays and in-game anti-automation rules can affect accuracy. Tests on static screenshots cannot verify that the game responds to Accessibility taps. If the bar says `AIM` or `POP` but the game ignores taps, the game's interaction mode/gesture likely needs further calibration on an actual device.
-
-The third-party Astra API endpoint/model's availability was supplied by the user and has not been independently verified. Setting `store:false` requests non-storage but cannot guarantee the provider's data policy. Never put a real API key into your public GitHub repository.
+API Xingchi là dịch vụ bên thứ ba, không nên đưa API key thật vào repository công khai.

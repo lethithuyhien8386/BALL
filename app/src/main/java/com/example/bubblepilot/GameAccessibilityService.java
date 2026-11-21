@@ -322,7 +322,9 @@ public final class GameAccessibilityService extends AccessibilityService {
             },main);
             if(sent) {
                 shotGate.shotDispatched(shot.stateSignature,SystemClock.elapsedRealtime());
-                updateStatus(shot.matched>=3?"POP "+shot.matched:"AIM "+Math.round(shot.angle));
+                String routeLabel=shot.bounces>0?"B"+shot.bounces+" ":"";
+                updateStatus(routeLabel+(shot.matched>=3?"POP "+shot.matched:
+                        "AIM "+Math.round(shot.angle)));
             } else {updateStatus("TAP ERR");scheduleFrame(token,700);}
         } catch(Exception e) {updateStatus("TAP ERR");scheduleFrame(token,700);}
     }
