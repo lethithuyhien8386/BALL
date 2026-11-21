@@ -1,0 +1,29 @@
+{
+  "provider": {
+    "openai": {
+      "options": {
+        "baseURL": "https://api.xingchiapi.com/v1",
+        "apiKey": "YOUR_KEY_IN_APP_SETTINGS_ONLY"
+      },
+      "models": {
+        "gpt-6-astra": {
+          "name": "GPT-6 Astra",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "options": {
+            "store": false
+          },
+          "variants": {
+            "low": {},
+            "medium": {},
+            "high": {},
+            "xhigh": {},
+            "max": {}
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Bubble Pilot</string>
+    <string name="a11y_description">Khi bạn nhấn Bắt đầu, dịch vụ này đọc ảnh màn hình và gửi thao tác chạm để tự động chơi trò ghép bóng. Có thể dừng ngay bằng thanh nổi.</string>
+</resources>

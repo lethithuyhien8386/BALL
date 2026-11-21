@@ -1,0 +1,14 @@
+Ket qua kiem tra image reference_game.png (422 x 757):
+- Tong so bong nhan dien: 76
+- Bong o nong: G (xanh la)
+- Hang 0: ORGRGRRGO
+- Hang 1: ORORRGOOOG
+- Hang 2: GGRRGRROR
+- Hang 3: ORRGGRGGGR
+- Hang 4: ORORORROG
+- Hang 5: OOGOGGOOGG
+- Hang 6: ROOGRGGRR
+- Hang 7: OOOOOOGOGG
+- Toa do cham du doan: (219,395), goc 4.0 do
+- Nhóm bóng tính được: 7 (mô phỏng, chưa kiểm chứng bằng game thực)
+- Thoi gian xu ly: ~30-60 ms tren may kiem thu, khong phai tren Android
