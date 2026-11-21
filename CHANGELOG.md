@@ -1,12 +1,8 @@
-# v0.7.0 — Continuous fire, fastest local planning, video 2 regression
+# v0.8.0 — Offline / video training regression
 
-- Remove no-POP automatic idle: every valid current ball gets a physics-checked trajectory. Strongly favor pops first, then same-color future setups, then low-cost next-ball advances.
-- Fix launcher misidentification with rotated cannon and animated blue character at 68s/100s of user video 2.
-- Refit shifted lattice when observed ball count drops sharply; resolve partial-grid scoring from the user video.
-- Expand candidate diversity from 28 to 96 routes, include angle perturbations and wall banks.
-- Cut nominal frame check interval from 115 to 55ms and minimum post-shot gate from 240 to 120ms, preserving two stable frames and adding screenshot API throttle backoff.
-- Keep optionally enabled nonblocking GPT-6 Astra advice: no remote request can hold up a ready shot.
-- Add VideoContinuousTest with 13 selected frames from user video 2. Retain older palette, geometry, trajectory and gate tests.
-- Update version to 0.7.0 and GitHub Actions artifact names.
-
-Caveat: Only offline frame tests were run in the creation environment; Android compilation, installation and live-game play must still be verified on GitHub/device.
+- Remove remote advisor, credential UI, remote configuration, and Internet permission; retain only credential cleanup on upgrade.
+- Separate yellow/orange and magenta/violet, improve recorded viewport calibration and reject score screens.
+- Add skill icon template matching, state machine, time / gold / rainbow selection, explicit blue exclusion. X2 awaits a verified icon template.
+- Add in-flight detection, preview in the turn signature, confirmed-flight handling, overlay hit guard, and plan caching.
+- Preserve existing geometry/occlusion/installation checks; add real-frame training regression and skill controller tests.
+- Change package version to 0.8.0 / code 8, update GitHub artifact naming. APK not built in the editing environment.

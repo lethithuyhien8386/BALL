@@ -15,10 +15,10 @@ public final class NewGamePaletteTest {
         long started=System.nanoTime();
         GameSolver.Board board=solver.detect(pixels,w,h);
         if(board==null)throw new AssertionError("The previous APK failed: "+solver.diagnosis());
-        if(board.shooter!='P')throw new AssertionError("Expected the purple shooter, got "+board.shooter);
+        if(board.shooter!='V')throw new AssertionError("Expected the purple shooter, got "+board.shooter);
         if(board.count<58 || board.count>68)
             throw new AssertionError("Detected "+board.count+" bubbles instead of the visible grid");
-        if(board.balls[0][0]==null || board.balls[0][0].color!='P')
+        if(board.balls[0][0]==null || board.balls[0][0].color!='V')
             throw new AssertionError("Top row origin must align with the purple bubble");
         if(board.balls[0][7]==null || board.balls[0][7].color!='B')
             throw new AssertionError("Cyan ball not recognized");

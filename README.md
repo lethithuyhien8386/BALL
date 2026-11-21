@@ -1,37 +1,25 @@
-# BubblePilot Astra v0.7.0 — Continuous Fire / Video 2 Fix
+# Bubble Pilot Offline v0.8.0
 
-Dự án Android Java (Android 8.0+, minSdk 26) để build APK bằng **GitHub Actions**. Không phải APK có sẵn và chưa được thử chơi trực tiếp trên máy thật.
+Ứng dụng Android thử nghiệm nhận diện Bubble Shooter bằng pixel và tính toán đường bắn tại thiết bị, dành cho môi trường chơi thử offline. Không root, không gửi ảnh lên máy chủ, không dùng AI từ xa. Cần người dùng bật CLICK/FLOAT; Android 8–10 cần CAPTURE. Min SDK 26, compile/target SDK 35, JDK 17, Gradle 8.9 và AGP 8.7.3.
 
-## Thay đổi theo video `video ball 2.mp4` (105,4 giây)
+## Build APK bằng GitHub Actions
 
-- **Không dừng khi không có POP**: khi có bóng hợp lệ ở nòng súng và tìm được đường bay, bot luôn chọn một cú bắn. Thứ tự: (1) nổ cụm >=3 quả cùng màu, tối ưu bóng nổ + bóng rơi + pixel hiển thị; (2) ghép chuẩn bị combo; (3) bắn ít bất lợi nhất để đổi bóng. Các lượt (2) và (3) có thể **bị trừ điểm**, đúng theo yêu cầu của người dùng.
-- **Sửa nhận sai bóng nòng khi súng nghiêng**: quét ±2,15 bán kính quanh tâm nòng (thay vì ±0,45), giới hạn vùng dọc để không lấy phần đầu nhân vật màu xanh, cộng điểm cho màu tồn tại trên lưới. Tại giây 68 nhận bóng tím bị lệch trái; tại giây 100 nhận bóng đỏ bị lệch phải.
-- **Tự hiệu chuẩn lại lưới** khi số bóng nhận diện giảm đột ngột; khung giây 52 từ 3 bóng (sai) thành 51 bóng. Giữ lưới so le 9/10, vị trí tường dựa trên pixel và mô phỏng chắn đường/bật tường tối đa 3 lần.
-- **Chọn cú bắn tốt bằng cách xét nhiều đường**: mở rộng danh sách ứng viên lên 96, giữ đường bật tường, đánh giá lân cận góc ±0,17°/±0,34° và tường ±2 px. Xét xác suất vẫn có POP khi ô ghép thay đổi nhẹ, thay vì bắt buộc đúng cùng một ô.
-- **Giảm thời gian chờ**: chu kỳ kiểm tra khung hình cơ sở 55 ms thay vì 115 ms, khoảng tối thiểu giữa hai lượt 120 ms thay vì 240 ms (vẫn cần **hai khung hình ổn định**), thao tác click 35 ms. Nếu Android chặn screenshot vì chụp quá dày, tự động tăng thời gian đợi. Không thể vượt quá giới hạn ảnh chụp của Android bằng sửa thuật toán.
-- **Astra (`gpt-6-astra`)** vẫn nằm trong Settings với API key mã hóa; tư vấn nền qua `https://api.xingchiapi.com/v1` chỉ khi người dùng bật. Không chờ mạng trước khi bắn, vì đó là nguồn trễ không kiểm soát được. Kết quả API chỉ được dùng nếu đã đến kịp và qua mô phỏng va chạm + ghép màu. Với chế độ bắn ngay, hầu hết quyết định dựa vào bộ tối ưu tại thiết bị, không phải suy luận Astra qua mạng.
-- Giữ quyền **CLICK (Accessibility)**, **FLOAT**, thanh nổi kéo thả ▶/■/×, Android 8–10 cần thêm CAPTURE. Trên Android 11+ ứng dụng dùng ảnh chụp Accessibility và chịu giới hạn hệ thống.
+1. Giải nén ZIP. Đưa **toàn bộ nội dung thư mục**, bao gồm `.github/workflows/build-apk.yml`, lên repository GitHub (nhánh main hoặc master). Nếu dùng Windows, bật hiển thị file/thư mục ẩn để không bỏ sót `.github`.
+2. Chọn Actions → **Build and verify Bubble Pilot Offline v0.8 APK** → Run workflow. Workflow chạy kiểm thử Java, build APK debug đã ký, kiểm tra phiên bản/package/chữ ký rồi kiểm tra cài đặt và khởi chạy trên emulator Android 9/11.
+3. Khi cả ba job đều xanh, tải artifact **BubblePilot-Offline-v0.8-APK-InstallChecked**. Giải nén và cài `app-debug.apk`. APK candidate chưa qua emulator không phải bản install-checked. Nếu chữ ký debug khác bản cũ, có thể cần gỡ bản cũ trước; việc này xóa dữ liệu ứng dụng.
+4. Mở app và kiểm tra phiên bản v0.8.0. Bật CLICK và FLOAT; với Android 8–10 chấp nhận hộp thoại CAPTURE. Nhấn START để mở thanh nổi. Vào bàn chơi offline, đặt thanh nổi không che nút pause, bóng hoặc kỹ năng. Nhấn ▶ để bắt đầu, ■ để dừng, × để đóng.
 
-## Build APK trên GitHub
+Build local: cài JDK 17, Android SDK 35, Build Tools 35.0.0 và Gradle 8.9. Chạy `bash tests/test.sh` rồi `bash build-apk.sh` (Windows: `tests\test.bat`, `build-apk.bat`). APK nằm tại `app/build/outputs/apk/debug/app-debug.apk`.
 
-1. Giải nén ZIP và tải **mọi nội dung bên trong** lên thư mục gốc GitHub repository; có `.github/workflows/build-apk.yml`.
-2. GitHub → **Actions** → **Build and verify Bubble Pilot Astra v0.7 APK** → **Run workflow**.
-3. Chỉ sử dụng artifact **`BubblePilot-Astra-v0.7-APK-InstallChecked`** khi ba job `build`, `emulator-install-check` (Android 9/11) và `publish-verified` đều hoàn thành. Giải nén artifact để lấy `app-debug.apk`.
-4. Cài APK. Nếu ứng dụng cũ dùng chữ ký khác, sao lưu key rồi gỡ phiên bản cũ trước khi cài lại. Xác nhận màn hình ghi v0.7.0.
-5. Cấp CLICK/FLOAT (Android 8–10 thêm CAPTURE), mở game và nhấn ▶.
+## Tính năng và sửa lỗi
 
-## Kiểm thử
+- Loại bỏ phần cấu hình/gọi mô hình AI, mã gửi ảnh, quyền INTERNET và file cấu hình từ xa. `LocalSettings` chỉ lưu hiệu chỉnh hình học; có một đoạn di trú dọn thông tin xác thực cũ khi nâng cấp.
+- Tách màu cam (O) / vàng (Y), tím đậm (V) / tím hồng (P); giữ đỏ, xanh lá, xanh lam/cyan và vật thể đặc biệt trung tính. Vật thể đặc biệt trên bàn là vật cản, không bị coi là cùng màu với bóng thường.
+- Dùng bố cục cửa sổ quan sát được trong 5 video để khởi tạo lưới, có hiệu chỉnh lệch vị trí/hàng so le. Giữ hiệu chỉnh trước đó khi có thể. Kiểm tra HUD để tránh thao tác trên bảng tổng kết điểm/menu. Kiểm tra bóng bay trong khoảng trống giữa bàn và launcher, dùng hai khung ổn định trước khi bắn.
+- Giữ mô phỏng va chạm đầu tiên, bật tường và rơi bóng từ v0.7. Nếu không có POP đáng tin cậy vẫn chọn đường hợp lệ; không kẹt vì tất cả phương án vào vòng cuối là POP có độ ổn định thấp. Tái sử dụng kế hoạch khi chữ ký, vị trí và hình học không đổi. POP trên thanh nổi là **dự đoán mô phỏng**, không phải điểm đã ghi nhận.
+- `SkillVision` so khớp mẫu pixel của các biểu tượng thu từ video tại ba vị trí trong cột kỹ năng bên trái, không gán cố định kỹ năng cho thứ tự ô. `SkillController` ưu tiên tăng thời gian, giữ cầu 7 màu cho khi bóng thường không có POP và có cụm màu thay thế, dùng cầu vàng khi có đường trực tiếp đáng tin cậy. Hai quan sát trước khi bấm, hai quan sát mất biểu tượng để xác nhận, timeout nếu không xác nhận; chụp lại và lập kế hoạch sau khi kỹ năng thay đổi. Không kích hoạt biểu tượng xanh viền vàng/cam (IGNORE). Không tự suy diễn bán kính nổ/điểm của cầu vàng. Cơ chế sau khi kích hoạt cầu vàng/cầu 7 màu còn là giả định cần kiểm chứng trực tiếp.
+- X2: có kiểu và nhánh ưu tiên trong bộ điều phối, nhưng **chưa có mẫu biểu tượng được xác nhận từ video**, nên bộ nhận diện chưa trả về X2 và app chưa tự bấm X2. Không gán nhầm biểu tượng xanh cho X2. Nhận diện kỹ năng v0.8 được hiệu chỉnh cho bố cục có lề trong video; bố cục khác có thể không kích hoạt.
 
-- `bash tests/test.sh` (yêu cầu JDK 17 trở lên; không cần Android SDK cho phép thử thuật toán).
-- `VideoContinuousTest` dùng **13 khung hình lấy từ video 2** được đưa về 480 × 856 như ảnh đầu vào của ứng dụng: kiểm tra màn menu, màu nòng súng, lưới đổi chỗ, có POP thì POP và không có POP thì vẫn chọn được phát bắn hợp lệ.
-- `TrajectoryPhysicsTest`: chạm bóng chắn đầu tiên, bật tường hai phía và nhiều lượt; `ShotGateTest`: chống bắn trùng dù có ảnh lỗi. Các kiểm thử cũ được giữ lại và cập nhật tương ứng chính sách bắn liên tục.
-- Kết quả hiệu năng trên môi trường kiểm thử Java: lập kế hoạch thường vài mili-giây (đôi khi vài chục ms); tự tìm lại lưới có thể mất khoảng 100–150 ms. **Không phải số đo trên thiết bị Android**, còn tùy tốc độ chụp màn hình và độ trễ thao tác.
+## Kiểm thử và giới hạn
 
-**Giới hạn cần biết**: Test ảnh tĩnh không cho biết chính xác tốc độ/độ chính xác khi chơi trực tiếp. Kết quả POP/drop là ước lượng, luật bóng đặc biệt và vật lý thực tế có thể làm sai điểm. Nếu Android đang hiển thị menu, bóng còn bay hoặc không xác nhận được bóng nòng, app sẽ tạm không chạm để tránh bắn vào sai chỗ; **không có trạng thái dừng chỉ vì `matched=0`**. Không thể cam kết luôn đạt số điểm cao nhất hoặc phản ứng tức thời trên mọi thiết bị.
-
-**Bảo mật**: Xingchi là dịch vụ bên thứ ba, không phải endpoint chính thức của OpenAI. Chỉ nhập key trong ứng dụng và chủ động bật tư vấn Astra nếu tin tưởng dịch vụ; không đưa key lên GitHub.
-
-
-### GitHub Actions verification fix (November 2026)
-
-The APK verifier now reads `versionCode`, `versionName`, `minSdk`, and `applicationId` directly from `app/build.gradle`. This fixes a false CI failure where the app built as v0.7.0 but `scripts/verify-apk.sh` still expected v0.6.0. The application gameplay source is otherwise unchanged.
+Xem `TRAINING_REPORT.md` và `tests/results-v0.8.txt`. Bộ kiểm thử Java đã chạy trên môi trường phát triển, bao gồm hồi quy cũ và 5 video mới. Chưa có Android SDK/Gradle/emulator trong môi trường sửa mã này, nên chưa trực tiếp build APK hoặc kiểm tra tốc độ, thao tác, kỹ năng và điểm thực tế trên CloudPhone. Workflow GitHub có sẵn các bước build/kiểm tra, nhưng chưa được chạy ở đây. Cần ghi lại video mới khi thử offline để xác định mẫu X2, hình dạng bóng sau khi kích hoạt kỹ năng và kết quả điểm thực tế. Không cam kết điểm tối đa hoặc độ chính xác tuyệt đối từ ảnh tĩnh.

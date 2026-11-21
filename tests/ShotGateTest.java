@@ -19,6 +19,9 @@ public class ShotGateTest {
         assertYes(!gate.canShoot(222,1250), "Never double fire same board even after a missing frame");
         gate.reset();
         assertYes(!gate.canShoot(333,0) && gate.canShoot(333,100), "Reset starts fresh");
+        gate.shotDispatched(333,110);gate.observedFlight();
+        assertYes(!gate.canShoot(333,650),"Flight still requires fresh stable frames");
+        assertYes(gate.canShoot(333,800),"A real flight can advance an identical queue");
         System.out.println("ShotGate tests PASS");
     }
 }

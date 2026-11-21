@@ -1,0 +1,137 @@
+TỔNG HỢP YÊU CẦU ỨNG DỤNG BUBBLEPILOT
+============================================================
+
+
+1. MỤC TIÊU TỔNG QUAN
+------------------------------------------------------------
+- Tạo ứng dụng Android dưới dạng APK, có thể cài đặt và hoạt động
+  trên thiết bị Android, kể cả môi trường CloudPhone tương thích.
+- Nhận diện hình ảnh trò chơi Bubble Shooter, đánh giá trạng thái
+  bàn bóng và tự động thao tác trong môi trường chơi thử offline.
+- Mục tiêu người dùng đặt ra: phản ứng nhanh, chính xác, ghi điểm
+  hiệu quả hơn người chơi thông thường; không chọn vị trí tùy tiện.
+- Hoạt động liên tục cho đến khi người dùng chủ động dừng, miễn là
+  trò chơi có trạng thái hợp lệ.
+
+2. GIAO DIỆN VÀ QUYỀN ANDROID
+------------------------------------------------------------
+- Khi mở ứng dụng lần đầu, có các mục cấp quyền rõ ràng:
+  + CLICK: quyền Accessibility để thực hiện thao tác chạm.
+  + FLOAT: quyền hiển thị trên ứng dụng khác.
+  + Quyền chụp màn hình nếu phiên bản Android yêu cầu.
+- Có nút Start trên giao diện chính để mở thanh điều khiển nổi.
+- Thanh nổi có thể kéo thả, di chuyển đến vị trí phù hợp.
+- Có biểu tượng Start và Stop để bắt đầu hoặc dừng hoạt động.
+- Các bản đã trao đổi còn có nút đóng và trạng thái hoạt động;
+  đây là các tiện ích đã bổ sung, không phải yêu cầu ban đầu.
+- Thanh nổi không che khuất vùng cần quan sát hoặc cản thao tác.
+- Khi nhấn Stop, ứng dụng không được tiếp tục tự thao tác.
+
+3. NHẬN DIỆN HÌNH ẢNH VÀ PIXEL
+------------------------------------------------------------
+- Phân tích hình ảnh màn hình dựa trên pixel thực tế.
+- Nhận diện màu sắc, vị trí và kích thước các bóng trên bàn.
+- Nhận diện đúng bóng hiện tại đang chuẩn bị bắn; phân biệt với
+  bóng tiếp theo, bóng đang bay và các hiệu ứng chuyển lượt.
+- Nhận diện các màu bóng khác nhau, kể cả các bóng đặc biệt;
+  không chỉ giới hạn ở đỏ, cam và xanh lá như bản đầu tiên.
+- Không nhầm màu của nền cỏ, nước, nhân vật hay giao diện với bóng.
+- Khi đánh giá theo diện tích pixel, không tính phần bóng bị che
+  bởi bóng khác và không cộng trùng các phần bị chồng lấp.
+- Thích ứng với bàn chơi thay đổi, hàng bóng dịch chuyển, số lượng
+  bóng giảm hoặc tăng, và các độ phân giải màn hình khác nhau.
+
+4. TIÊU CHÍ ĐÁNH GIÁ KẾT QUẢ CHỌN VỊ TRÍ
+------------------------------------------------------------
+- Yêu cầu gốc: đánh giá các vị trí theo khả năng ghi điểm và chọn
+  vị trí thích hợp nhất; không chọn đại khi có lựa chọn tốt hơn.
+- Người dùng phản ánh nhiều lần rằng vẫn có các lượt tồn tại vị
+  trí thích hợp nhưng ứng dụng chọn sai vị trí hoặc sai màu.
+- Phải tính đến thực tế bóng khác có thể che chắn đường đi.
+- Trò chơi cho phép bóng dội lại từ tường; các tình huống này
+  cần được tính đến khi đánh giá kết quả trong trò chơi offline.
+- Tiêu chí kiểm thử gồm: nhận diện đúng màu, xử lý vật cản đúng,
+  đánh giá đúng kết quả ghép/nổ bóng và bóng rơi, và tọa độ thao
+  tác nhất quán với vị trí đã được đánh giá.
+- Không đánh giá một lựa chọn là ghi điểm thành công chỉ vì mô
+  phỏng dự đoán như vậy; cần đối chiếu với kết quả thực tế.
+- Mong muốn cuối cùng của người dùng là khắc phục triệt để tình
+  trạng có vị trí tốt nhưng ứng dụng lại thao tác ở chỗ khác.
+
+5. HOẠT ĐỘNG LIÊN TỤC VÀ QUY TẮC ĐIỂM
+------------------------------------------------------------
+- Theo mô tả của người dùng, bắn không đúng màu có thể bị trừ điểm.
+- Yêu cầu đã thay đổi: ban đầu muốn tránh các cú bắn bị trừ điểm;
+  sau đó yêu cầu không được ngừng chơi chỉ vì không có vị trí
+  ghi điểm phù hợp, chấp nhận mất điểm để chuyển sang bóng khác.
+- Khi có bóng mới, ứng dụng cần nhận biết và tiếp tục xử lý.
+- Không bắn trùng, không thao tác dựa trên trạng thái bàn cũ,
+  không nhầm bóng đang bay với bóng mới sẵn sàng.
+- Chỉ số đánh giá trong bản thử offline: tỷ lệ chọn đúng vị trí,
+  tỷ lệ ghi điểm, số lần bị trừ điểm và số lần bị kẹt chuyển lượt.
+
+6. KỸ NĂNG ĐẶC BIỆT
+------------------------------------------------------------
+Người dùng mô tả các kỹ năng được tích ở góc trái phía dưới:
+- X2 điểm: nhân đôi điểm.
+- Cầu vàng: khi bắn có khả năng gây nổ.
+- Cầu 7 màu: có thể chạm vào bất kỳ màu nào; người dùng muốn
+  dành kỹ năng này cho trường hợp có vị trí thích hợp.
+- Tăng thời gian: kéo dài thời gian chơi.
+- Kỹ năng màu xanh, hình tròn có viền vàng/cam theo ảnh gửi kèm
+  ngày 21/11/2026: yêu cầu bỏ qua, không click vào kỹ năng này.
+- Cần phân biệt ô kỹ năng với các bóng và vùng giao diện khác;
+  tránh kích hoạt nhầm.
+- Các đặc tính trên là mô tả của người dùng, chưa phải luật game
+  đã được xác minh độc lập. Không suy diễn thêm phạm vi nổ, thời
+  lượng hoặc điều kiện kích hoạt khi chưa có thông tin.
+
+7. TỐC ĐỘ VÀ ĐỘ ỔN ĐỊNH
+------------------------------------------------------------
+- Người dùng nhiều lần yêu cầu tốc độ tối đa: khi có bóng mới,
+  nhận diện và phản hồi nhanh nhất có thể.
+- Giảm độ trễ từ lúc nhận diện đến lúc thao tác.
+- Tốc độ không được đánh đổi bằng việc chọn vị trí ngẫu nhiên.
+- Hoạt động ổn định qua nhiều lượt, không bị treo hoặc giật lag.
+- Cần đo tốc độ thực tế trên Android, không đánh đồng thời gian
+  xử lý một ảnh tĩnh trên máy tính với tốc độ hoạt động thực tế.
+- Không có ngưỡng mili giây cố định nào được người dùng yêu cầu;
+  các con số xuất hiện trong những bản cũ là thông số triển khai.
+
+8. MÃ NGUỒN, BUILD VÀ CÀI ĐẶT
+------------------------------------------------------------
+- Cung cấp mã nguồn dưới dạng ZIP có thể giải nén, đưa lên GitHub
+  để build APK bằng GitHub Actions.
+- Cấu trúc thư mục và cấu hình build cần đầy đủ.
+- Khắc phục các lỗi build đã gặp, bao gồm lỗi SDK không tìm thấy
+  gói tools và lỗi kiểm tra sai phiên bản APK sau khi build.
+- APK phải có cấu trúc và chữ ký hợp lệ, cài được trên phiên bản
+  Android được hỗ trợ; không báo lỗi parsing the package.
+- Cần kiểm tra khả năng khởi chạy ứng dụng, không chỉ kiểm tra
+  việc tạo ra file APK.
+- Người dùng từng phản ánh APK chỉ 34 KB hoặc 60 KB và gặp lỗi
+  cài đặt hoặc hoạt động. Không có yêu cầu dung lượng tối thiểu
+  cụ thể; điều quan trọng là APK đầy đủ chức năng và chạy được.
+- Bản cập nhật cần giữ các chức năng đã hoạt động ổn định.
+
+9. KIỂM THỬ VÀ CÁC LỖI ĐÃ PHẢN ÁNH
+------------------------------------------------------------
+- Sử dụng ảnh và video người dùng đã gửi để đối chiếu hiện tượng
+  nhận diện sai, thao tác sai và lỗi chuyển lượt.
+- Ghi nhận các lỗi đã xuất hiện trong quá trình phát triển:
+  + APK không cài được hoặc GitHub Actions báo lỗi.
+  + Đã vào game nhưng không thao tác, hiện CHỜ BÓNG.
+  + Không nhận diện được một số màu bóng mới.
+  + Chọn mục tiêu có bóng khác chắn phía trước.
+  + Chọn sai dù có vị trí thích hợp hơn.
+  + Bắn sai màu gây trừ điểm.
+  + Ngừng bắn khi không có vị trí ghép màu.
+  + Chưa tận dụng đúng các kỹ năng đặc biệt.
+- Kiểm tra hồi quy trên các tình huống tương đương trong trò
+  chơi offline, bao gồm bóng chắn, bật tường, màu bóng, kỹ năng,
+  chuyển lượt và tốc độ phản hồi.
+- Phân biệt kết quả mô phỏng, kiểm thử mã nguồn, kiểm thử cài APK
+  và kiểm thử trực tiếp trong trò chơi offline trên thiết bị.
+- Không cam kết đạt điểm tối đa tuyệt đối hoặc nhanh hơn người
+  thật nếu chưa có phép đo và kết quả kiểm chứng thực tế.
+

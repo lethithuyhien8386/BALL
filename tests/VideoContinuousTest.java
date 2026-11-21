@@ -31,7 +31,7 @@ public final class VideoContinuousTest {
                 require(board==null,"Never fire on the initial menu");
             }
             if(file.getName().equals("t068.png")) {
-                require(board!=null && board.shooter=='P',"At 68s loaded bubble is purple, not dragon blue");
+                require(board!=null && board.shooter=='V',"At 68s loaded bubble is purple, not dragon blue");
                 require(Math.abs(board.shooterX-width*.5)>10,"Rotated cannon ball must not be forced to center");
             }
             if(file.getName().equals("t100.png"))

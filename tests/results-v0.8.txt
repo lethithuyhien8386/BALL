@@ -1,0 +1,49 @@
+Image: 422x757; shooter=G; ballCount=76
+row 0 ORGRGRRGO_
+row 1 ORORRGOOOG
+row 2 GGRRGRROR_
+row 3 ORRGGRGGGR
+row 4 ORORORROG_
+row 5 OOGOGGOOGG
+row 6 ROOGRGGRR_
+row 7 OOOOOOGOGG
+row 8 __________
+Proposed tap=(231,390), angle=7.3 deg, estimated score=1111.95, matched=7, dropped=0, time=212.6 ms
+ShotGate tests PASS
+ImageScaleTest PASS at 422x757 and 844x1514
+NEW GAME PASS: 441x791, shooter=V, balls=62, special=W, tap=288,424, score=422.0, initial=184.0 ms
+unobstructed: angle=-2.46 bank=0 contact=1,4 snap=2,4 match=3 drop=0 score=409.6 conf=1.00 (208,412)
+first obstacle: angle=-2.46 bank=0 contact=5,4 snap=6,4 match=0 drop=0 score=-53.0 conf=1.00 (208,412)
+wall tile -2: angle=-56.06 bank=2 contact=1,4 snap=2,4 match=3 drop=0 score=405.2 conf=1.00 (60,495)
+wall tile -1: angle=-34.38 bank=1 contact=1,4 snap=2,3 match=3 drop=0 score=410.1 conf=1.00 (110,445)
+wall tile 1: angle=36.96 bank=1 contact=1,4 snap=2,4 match=3 drop=0 score=409.6 conf=1.00 (329,450)
+wall tile 2: angle=54.26 bank=2 contact=1,4 snap=2,3 match=3 drop=0 score=404.7 conf=1.00 (369,490)
+automatic bank: angle=-34.63 bank=1 contact=1,4 snap=2,3 match=3 drop=1 score=622.0 conf=1.00 (109,445)
+TrajectoryPhysicsTest PASS (direct blocker, both walls, two banks, robust bank choice)
+Geometry PASS reference: walls=39.0,370.0, bubbleCenters=45.2,364.2, shooter=208.0,569.0, best bounce=0, confidence=1.00
+Geometry PASS shifted HUD: walls=54.8,384.2, bubbleCenters=56.8,376.3, shooter=220.0,599.0, best bounce=0, confidence=1.00
+VIDEO t=00 board=76 shooter=G route=pop=4 bank=0 conf=1.00 time=95ms status=OK 76 B?NG G
+VIDEO t=24 board=72 shooter=G route=pop=0 bank=0 conf=1.00 time=32ms status=OK 72 B?NG G
+VIDEO t=40 board=67 shooter=Y route=pop=3 bank=1 conf=1.00 time=58ms status=OK 67 B?NG Y
+VIDEO t=52 board=49 shooter=Y route=pop=3 bank=0 conf=1.00 time=96ms status=OK 49 B?NG Y
+VIDEO t=64 board=62 shooter=G route=pop=4 bank=1 conf=0.50 time=21ms status=OK 62 B?NG G
+VIDEO t=76 board=55 shooter=V route=pop=0 bank=0 conf=1.00 time=22ms status=OK 55 B?NG V
+VIDEO t=92 board=51 shooter=Y route=pop=0 bank=0 conf=1.00 time=19ms status=OK 51 B?NG Y
+VideoSafetyTest PASS (real video, always advance, local pop validation)
+VIDEO2 t000.png n=0 shooter=- pop=0 drop=0 bounce=0 dt=32+0ms
+VIDEO2 t008.png n=76 shooter=G pop=0 drop=0 bounce=0 dt=59+32ms
+VIDEO2 t024.png n=61 shooter=R pop=3 drop=0 bounce=0 dt=34+45ms
+VIDEO2 t028.png n=50 shooter=Y pop=3 drop=1 bounce=1 dt=21+15ms
+VIDEO2 t040.png n=36 shooter=Y pop=4 drop=9 bounce=0 dt=24+23ms
+VIDEO2 t044.png n=50 shooter=V pop=6 drop=16 bounce=1 dt=25+23ms
+VIDEO2 t052.png n=44 shooter=V pop=3 drop=1 bounce=0 dt=25+31ms
+VIDEO2 t060.png n=44 shooter=G pop=3 drop=2 bounce=0 dt=20+15ms
+VIDEO2 t068.png n=50 shooter=V pop=0 drop=0 bounce=0 dt=202+10ms
+VIDEO2 t072.png n=53 shooter=V pop=0 drop=0 bounce=1 dt=23+10ms
+VIDEO2 t080.png n=59 shooter=V pop=0 drop=0 bounce=0 dt=19+5ms
+VIDEO2 t096.png n=54 shooter=G pop=5 drop=0 bounce=0 dt=14+12ms
+VIDEO2 t100.png n=46 shooter=R pop=6 drop=9 bounce=0 dt=8+15ms
+VIDEO2 PASS ready=12 pop=8 advance=4
+FALLBACK PASS: always progresses when current color cannot score
+TRAINING PASS: 5 videos, 14 icon sets, palette separation, 76-ball grid, score-screen gate, flight and initial readiness
+SKILL CONTROLLER PASS (stable, time priority, rainbow, gold, ignore, timeout)

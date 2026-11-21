@@ -31,7 +31,7 @@ public final class VideoSafetyTest {
                         "t=0: ceiling row starts with red balls");
             }
             if(t==40) {
-                check(b!=null && b.shooter=='O' && b.count>=60,
+                check(b!=null && b.shooter=='Y' && b.count>=60,
                         "t=40: yellow projectile and wide ceiling row");
                 check(b.balls[0][0]!=null && b.balls[0][0].color=='R',
                         "t=40: top row correctly anchored");
@@ -52,7 +52,7 @@ public final class VideoSafetyTest {
         GameSolver sol=new GameSolver(cfg);
         check(sol.bestShot(noGreen)!=null && sol.bestShot(noGreen).matched==0,
                 "Planner must advance to next ball when no match exists");
-        check(sol.safeShotAtTap(noGreen,230,420)==null,"Astra MUST NOT bypass zero-pop filter");
-        System.out.println("VideoSafetyTest PASS (real video, always advance, cloud pop validation)");
+        check(sol.safeShotAtTap(noGreen,230,420)==null,"Proposed tap must not bypass zero-pop filter");
+        System.out.println("VideoSafetyTest PASS (real video, always advance, local pop validation)");
     }
 }

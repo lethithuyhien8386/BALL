@@ -41,7 +41,7 @@ grep -Fq "versionName='$VERSION_NAME'" <<< "$BADGING" || fail "Wrong versionName
 grep -Fq "sdkVersion:'$MIN_SDK'" <<< "$BADGING" || fail "Wrong minSdk (expected $MIN_SDK)"
 
 {
-  echo "Bubble Pilot Astra — debug APK verification"
+  echo "Bubble Pilot Offline — debug APK verification"
   echo "APK bytes: $(stat -c '%s' "$APK")"
   echo "Expected metadata from Gradle: $APP_ID $VERSION_NAME (code $VERSION_CODE); minSdk $MIN_SDK"
   sha256sum "$APK"

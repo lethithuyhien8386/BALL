@@ -150,6 +150,8 @@ public final class GameSolver {
     }
 
     private final Configuration cfg;
+    private boolean allowSpecialLauncher=false;
+    public GameSolver specialLauncher(boolean allow){allowSpecialLauncher=allow;return this;}
     private String diagnosis = "CHỜ KHUNG HÌNH";
     private static volatile SavedLayout savedLayout;
     private static final class SavedLayout {
@@ -197,10 +199,12 @@ public final class GameSolver {
         else h=240+60*(r-g)/diff;
         if(h<0)h+=360;
         if (h<18 || h>=345) return 'R';
-        if (h>=18 && h<68) return 'O';
+        if (h>=18 && h<41) return 'O';
+        if (h>=41 && h<68) return 'Y';
         if (h>=68 && h<164) return 'G';
         if (h>=164 && h<252 && b*100>g*107) return 'B';
-        if (h>=252 && h<345) return 'P';
+        if (h>=252 && h<286) return 'V';
+        if (h>=286 && h<345) return 'P';
         return ' ';
     }
     private static int pix(int[] data,int w,int h,double x,double y) {
@@ -214,7 +218,7 @@ public final class GameSolver {
                 +Math.abs((a&255)-(b&255));
     }
     private static char patchColor(int[] data,int w,int h,double x,double y,double r) {
-        final char[] palette={'R','O','G','B','P','W'};
+        final char[] palette={'R','O','Y','G','B','V','P','W'};
         int[] counts=new int[palette.length];
         for(double[] pos:SAMPLE) {
             char c=pixelClass(pix(data,w,h,x+pos[0]*r,y+pos[1]*r));
@@ -351,7 +355,7 @@ public final class GameSolver {
                     }
         return c;
     }
-    private static Configuration findLayout(int[] px,int w,int h,Configuration original) {
+    private Configuration findLayout(int[] px,int w,int h,Configuration original) {
         // Video regression: actual arena in the 720x1292 recording is narrower
         // than the screenshot-only fixtures. Derive pitch from VISIBLE walls,
         // not a fixed fraction of screen width. The 10-column row spans one
@@ -466,7 +470,7 @@ public final class GameSolver {
             this.x=x;this.y=y;this.color=color;this.confidence=confidence;
         }
     }
-    private static LauncherBall findLauncher(int[] pixels,int w,int h,Configuration cfg,
+    private LauncherBall findLauncher(int[] pixels,int w,int h,Configuration cfg,
                                              Ball[][] visibleGrid) {
         double r=w*cfg.radiusX;
         // The video shows the loaded ball 20-30px ABOVE the old launchY.
@@ -482,10 +486,10 @@ public final class GameSolver {
         // corridor missed those frames and picked cyan parts of the sprite.
         // The next-ball preview is lower-right; do not search that region.
         int x0=(int)Math.max(r,cx-r*2.15),x1=(int)Math.min(w-r,cx+r*2.15);
-        int y0=(int)(h*.705),y1=(int)(h*.775);
+        int y0=(int)(h*(cfg.launchY-.054)),y1=(int)(h*(cfg.launchY+.016));
         for(int y=y0;y<=y1;y+=2)for(int x=x0;x<=x1;x+=2) {
             char color=patchColor(pixels,w,h,x,y,r);
-            if(color==' ' || color=='W')continue;
+            if(color==' ' || (color=='W' && !allowSpecialLauncher))continue;
             int match=0,second=0;
             for(double[] p:SAMPLE) {
                 char cls=pixelClass(pix(pixels,w,h,x+p[0]*r,y+p[1]*r));
@@ -500,7 +504,7 @@ public final class GameSolver {
             // sphere may move sideways when the cannon points left/right.
             double q=match*1.3+circular*1.1-second*.7
                     -Math.abs(x-w*.50)*.025
-                    -Math.abs(y-h*.742)*.040;
+                    -Math.abs(y-h*(cfg.launchY-.017))*.040;
             if(colorCount[color]>0)q+=3.5;
             else if(color=='B')q-=2.0; // animated blue cannon neck
             if(q>qualityBest) {
@@ -509,9 +513,20 @@ public final class GameSolver {
                         Math.min(1.0,(match/13.0*.55+circular/8.0*.45)));
             }
         }
+        if(best==null && allowSpecialLauncher){
+            for(int y=y0;y<=y1;y+=2)for(int x=x0;x<=x1;x+=2){
+                int circ=circularQuality(pixels,w,h,x,y,r);
+                if(circ<7)continue;
+                int colored=0;java.util.HashSet<Character> palette=new java.util.HashSet<>();
+                for(double[] off:SAMPLE){char c=pixelClass(pix(pixels,w,h,x+off[0]*r,y+off[1]*r));if(c!=' '){colored++;palette.add(c);}}
+                if(colored<11 || palette.size()<3)continue;
+                double q=circ*2-Math.abs(x-cx)*.04-Math.abs(y-h*(cfg.launchY-.017))*.08;
+                if(q>qualityBest){qualityBest=q;best=new LauncherBall(x,y,'W',.86);}
+            }
+        }
         return best;
     }
-    private static Board detectAt(int[] pixels,int w,int h,Configuration c) {
+    private Board detectAt(int[] pixels,int w,int h,Configuration c) {
         double radius=w*c.radiusX;
         Configuration measured=copy(c);
         double[] walls=detectArenaEdges(pixels,w,h,radius);
@@ -570,22 +585,94 @@ public final class GameSolver {
             // sparse boards. Do not erase it; the planner will use a setup or
             // advance shot. Circular + launcher-position checks protect from
             // the dragon/preview being recognized as a loaded projectile.
-            if(same==0 && launcher.confidence<.92) {shooter=' ';launcher=null;}
+            if(same==0 && launcher.confidence<.92 && !allowSpecialLauncher) {shooter=' ';launcher=null;}
         }
         hash^=shooter;hash*=0x100000001b3L;
+        // The preview distinguishes consecutive turns with the same loaded color.
+        // Use the preview only if it is a real circular colored bubble.
+        double nx=w*.59,ny=h*.782;
+        char next=patchColor(pixels,w,h,nx,ny,radius);
+        if(next!=' ' && next!='W' && circularQuality(pixels,w,h,nx,ny,radius)>=6) {
+            hash^=next;hash*=0x100000001b3L;
+        }
         return new Board(w,h,measured,found,shooter,count,hash,
                 launcher==null?w*c.launchX:launcher.x,
                 launcher==null?h*c.launchY:launcher.y,
                 launcher==null?0:launcher.confidence);
     }
+    private static boolean pauseBadge(int[] px,int w,int h,double x,double y,double r) {
+        int gold=0,dark=0;
+        // Yellow circular button with two dark brown vertical pause strokes.
+        for(double[] pos:new double[][]{{0,-.72},{0,.72},{-.72,0},{.72,0},{0,0}}) {
+            int rgb=pix(px,w,h,x+r*pos[0],y+r*pos[1]);
+            int a=rgb>>16&255,b=rgb>>8&255,c=rgb&255;
+            if(a>160 && b>125 && a-c>65 && b-c>35)gold++;
+        }
+        for(double side:new double[]{-.25,.25})for(double v:new double[]{-.25,0,.25}){
+            int rgb=pix(px,w,h,x+r*side,y+r*v);
+            if((rgb>>16&255)<160 && (rgb>>8&255)<130)dark++;
+        }
+        return gold>=4 && dark>=3;
+    }
+    static boolean recordedHud(int[] px,int w,int h){
+        for(double x:new double[]{.119,.123,.127,.131})for(double y:new double[]{.112,.115,.118})
+            if(pauseBadge(px,w,h,w*x,h*y,w*.046))return true;
+        return false;
+    }
+    private static Configuration recordingLayout(int[] px,int w,int h,Configuration cfg){
+        Configuration best=null;double score=-1;
+        // Known viewport visible in all five videos; narrow local fitting keeps
+        // false circular scenery from shifting the grid several columns.
+        for(boolean narrow:new boolean[]{true,false})for(double dy:new double[]{-2,0,2})
+        for(double dx:new double[]{-4,-2,0,2})for(double dp:new double[]{-.4,0,.4}){
+            Configuration c=copy(cfg);
+            c.oddX=(83*w/480.0+dx*w/480.0)/w;
+            c.colPitch=(35.2+dp)/480.0;c.radiusX=16.3/480.0;
+            c.topY=.175+dy/h;c.rowPitch=.0354;c.narrowTop=narrow;
+            c.boardLeft=.130;c.boardRight=.875;c.detectedArena=true;
+            double fit=fit(px,w,h,c,10);
+            if(fit>score){score=fit;best=c;}
+        }
+        return best;
+    }
     public Board detect(int[] pixels,int w,int h) {
         if(pixels==null || w<180 || h<350 || pixels.length!=w*h) {
             diagnosis="ẢNH KHÔNG HỢP LỆ";return null;
         }
+        boolean hud=recordedHud(pixels,w,h);
+        // Full screen artwork has a different pause badge position. Reject
+        // score/menu screens before any grid search can hallucinate a board.
+        boolean fullHud=false;
+        for(double x:new double[]{.052,.055,.075,.085,.095,.105})for(double y:new double[]{.045,.075,.082,.09})
+            if(pauseBadge(pixels,w,h,x*w,y*h,w*.05))fullHud=true;
+        // Zoomed/cropped view can clip the pause badge, but retains the
+        // purple top band, cyan arena sides and green SCORE label.
+        boolean croppedHud=false;
+        int bandRows=0,labelRows=0;
+        for(double yy:new double[]{.066,.075,.085,.095,.105,.115}){
+            int purple=0,green=0;
+            for(double xx=.105;xx<=.44;xx+=.012){
+                int rgb=pix(pixels,w,h,w*xx,h*yy);
+                char color=pixelClass(rgb);
+                if(color=='P' || color=='V')purple++;
+                if(color=='G' || color=='Y')green++;
+            }
+            if(purple>=20)bandRows++;
+            if(green>=3 && purple>=3)labelRows++;
+        }
+        croppedHud=bandRows>=2 && labelRows>=1;
+        if(!hud && !fullHud && !croppedHud){diagnosis="KHÔNG TRONG VÁN";return null;}
         Configuration calibrated=null;
         SavedLayout previous=savedLayout;
         if(previous!=null && previous.w==w && previous.h==h) calibrated=previous.apply(cfg);
         Board result=calibrated==null?null:detectAt(pixels,w,h,calibrated);
+        if(hud && (result==null || result.count<9 || (previous!=null && result.count<previous.previousCount*.85))){
+            Configuration local=recordingLayout(pixels,w,h,cfg);
+            Board candidate=detectAt(pixels,w,h,local);
+            // The recording viewport is known; do not shift to unrelated
+            // scenery just because a wider search counts more false circles.
+            if(result==null || candidate.count>=result.count-2){calibrated=local;result=candidate;}
+        }
         // After a new ceiling row, the game can reverse the 9/10 bubble
         // stagger WITHOUT moving the arena edges. Do not reuse the previous
         // parity just because it still finds some coincidental colored pixels.
@@ -599,9 +686,9 @@ public final class GameSolver {
         }
         // Refit if the HUD/grid moved, or if no longer detecting a useful board.
         // Retain the last good calibration for sparse endgame boards.
-        if(result==null || result.count<9 ||
+        if(!hud && (result==null || result.count<9 ||
                 (previous!=null && result.count<previous.previousCount*.85 &&
-                 previous.previousCount>=22)) {
+                 previous.previousCount>=22))) {
             Configuration found=findLayout(pixels,w,h,cfg);
             if(found!=null) {
                 Board candidate=detectAt(pixels,w,h,found);
@@ -617,7 +704,7 @@ public final class GameSolver {
             diagnosis="ĐANG CẬP NHẬT LƯỚI";return null;
         }
         if(result.shooter==' ') {diagnosis="CHƯA CÓ BÓNG SẴN SÀNG";return null;}
-        if(result.shooter=='W') {diagnosis="BÓNG ĐẶC BIỆT";return null;}
+        if(result.shooter=='W' && !allowSpecialLauncher) {diagnosis="BÓNG ĐẶC BIỆT";return null;}
         if(result.shooterConfidence<.80) {
             diagnosis="MÀU BÓNG CHƯA CHẮC";return null;
         }
@@ -840,7 +927,7 @@ public final class GameSolver {
                 contact.target==null?-1:contact.target.col,
                 place.row,place.col,1);
     }
-    /** Recheck Astra targets with identical collision, wall and snap physics. */
+    /** Recheck proposed targets with identical collision, wall and snap physics. */
     public Shot shotAtTap(Board b,int x,int y) {
         if(b==null || x<2 || x>=b.width-2 || y<2 || y>=b.shooterY-15)return null;
         double angle=Math.toDegrees(Math.atan2(x-b.shooterX,b.shooterY-y));
@@ -934,6 +1021,36 @@ public final class GameSolver {
      * that a coarse uniform scan can miss. EVERY candidate is still ray-traced
      * from the launcher and is rejected if an earlier bubble obstructs it.
      */
+    /** A clearly separated colored round object in the gap can indicate an
+     * in-flight projectile. Never treat a missing screenshot as flight. */
+    public boolean hasAirborneBubble(int[] px,Board b) {
+        if(b==null)return false;
+        double bottom=b.topY;
+        for(Ball[] row:b.balls)for(Ball ball:row)if(ball!=null)bottom=Math.max(bottom,ball.y);
+        double rr=b.radius,step=Math.max(3,rr*.45);
+        for(double y=bottom+rr*2.0;y<b.shooterY-rr*2.2;y+=step)
+            for(double x=b.leftWall;x<=b.rightWall;x+=step){
+                char col=patchColor(px,b.width,b.height,x,y,rr);
+                if(col==' ' || col=='W' || circularQuality(px,b.width,b.height,x,y,rr)<7)continue;
+                int n=0;for(double[] off:SAMPLE)if(pixelClass(pix(px,b.width,b.height,x+off[0]*rr,y+off[1]*rr))==col)n++;
+                if(n>=11)return true;
+            }
+        return false;
+    }
+    /** Candidate for a wildcard projectile: choose a reachable cluster of any
+     * known normal color. No extra blast radius or score rules are assumed. */
+    public Shot bestWildcardRoute(Board b) {
+        if(b==null)return null;
+        Shot best=null;
+        boolean[] colors=new boolean[128];
+        for(Ball[] row:b.balls)for(Ball ball:row)if(ball!=null && ball.color<128 && ball.color!='W')colors[ball.color]=true;
+        for(char c:new char[]{'R','O','Y','G','B','V','P'})if(colors[c]) {
+            Board proxy=new Board(b.width,b.height,b.cfg,b.balls,c,b.count,b.signature,b.shooterX,b.shooterY,b.shooterConfidence);
+            Shot next=bestShot(proxy);
+            if(next!=null && next.matched>=3 && next.reliability>=.5 && (best==null || next.score>best.score))best=next;
+        }
+        return best;
+    }
     public Shot bestShot(Board b) {
         if(b==null)return null;
         List<Ball> all=asList(b);
@@ -999,6 +1116,16 @@ public final class GameSolver {
         // A setup / advance shot may cost points; it is chosen ONLY when no
         // credible pop is reachable. The caller must never turn null-pop into
         // an idle state when bestAdvance exists.
-        return bestPop!=null?bestPop:bestAdvance;
+        if(bestPop!=null)return bestPop;
+        if(bestAdvance!=null)return bestAdvance;
+        // All retained candidates may be fragile pops. Still return the most
+        // reliable legal route rather than freezing an otherwise valid turn.
+        Shot fallback=null;
+        for(Shot candidate:finalists) {
+            Shot ranked=stabilityRank(b,all,candidate);
+            if(fallback==null || ranked.reliability>fallback.reliability ||
+                    (ranked.reliability==fallback.reliability && ranked.score>fallback.score))fallback=ranked;
+        }
+        return fallback;
     }
 }
