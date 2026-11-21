@@ -13,8 +13,9 @@ import java.util.List;
  * Snap positions follow a staggered hexagonal grid. A shot is scored by balls
  * removed in >=3-color clusters plus disconnected balls that subsequently drop.
  *
- * Assumptions: three ball colors, fixed staggered grid, tap-to-aim, ordinary
- * match-3 bubble-shooter rules. Game variants need calibration/testing.
+ * Assumptions: a staggered hexagonal grid and tap-to-aim rules. It recognizes
+ * red, orange, green, blue/cyan, purple, plus neutral special/obstacle balls.
+ * Grid placement is estimated from each screenshot when it changes.
  */
 public final class GameSolver {
     public static final int ROWS = 19;
@@ -99,23 +100,52 @@ public final class GameSolver {
     }
 
     private final Configuration cfg;
+    private String diagnosis = "CHỜ KHUNG HÌNH";
+    private static volatile SavedLayout savedLayout;
+    private static final class SavedLayout {
+        final int w,h;
+        final double topY,oddX,colPitch,rowPitch,radiusX;
+        SavedLayout(int w,int h,Configuration c) {
+            this.w=w;this.h=h;topY=c.topY;oddX=c.oddX;
+            colPitch=c.colPitch;rowPitch=c.rowPitch;radiusX=c.radiusX;
+        }
+        Configuration apply(Configuration input) {
+            Configuration result=copy(input);
+            result.topY=topY;result.oddX=oddX;
+            result.colPitch=colPitch;result.rowPitch=rowPitch;result.radiusX=radiusX;
+            return result;
+        }
+    }
     public GameSolver(Configuration cfg) { this.cfg=cfg; }
+    public String diagnosis() {return diagnosis;}
+    public static void resetCalibration() {savedLayout=null;}
+    private static Configuration copy(Configuration a) {
+        Configuration b=new Configuration();
+        b.topY=a.topY;b.launchY=a.launchY;b.launchX=a.launchX;
+        b.boardLeft=a.boardLeft;b.boardRight=a.boardRight;
+        b.oddX=a.oddX;b.colPitch=a.colPitch;b.rowPitch=a.rowPitch;
+        b.radiusX=a.radiusX;
+        return b;
+    }
 
-    // Pixel classifier deliberately avoids HSV float math for per-frame speed.
+    // Integer HSV classifier. Includes newly observed violet and cyan bubbles.
+    // A pale circle with low saturation is treated as a non-matching obstacle.
     private static char pixelClass(int rgb) {
         int r=(rgb>>>16)&255, g=(rgb>>>8)&255, b=rgb&255;
         int max=Math.max(r,Math.max(g,b)), min=Math.min(r,Math.min(g,b));
         int diff=max-min;
-        if(max<70 || diff*100<max*71 || diff==0) return ' ';
-        // Integer HSV hue (0..360 degrees) is robust to shaded circles.
+        if (max>150 && diff*100<max*18) return 'W';
+        if (max<70 || diff*100<max*30 || diff==0) return ' ';
         int h;
-        if(max==r) h=(60*(g-b))/diff;
-        else if(max==g)h=120+(60*(b-r))/diff;
-        else h=240+(60*(r-g))/diff;
+        if(max==r)h=60*(g-b)/diff;
+        else if(max==g)h=120+60*(b-r)/diff;
+        else h=240+60*(r-g)/diff;
         if(h<0)h+=360;
-        if((h<18 || h>343) && r*100>g*135 && r*100>b*132)return 'R';
-        if(h>=18 && h<53 && r*100>g*113 && r*100>b*140)return 'O';
-        if(h>=70 && h<=145 && g*100>r*120 && g*100>b*120)return 'G';
+        if (h<18 || h>=345) return 'R';
+        if (h>=18 && h<68) return 'O';
+        if (h>=68 && h<164) return 'G';
+        if (h>=164 && h<252 && b*100>g*107) return 'B';
+        if (h>=252 && h<345) return 'P';
         return ' ';
     }
     private static int pix(int[] data,int w,int h,double x,double y) {
@@ -129,23 +159,35 @@ public final class GameSolver {
                 +Math.abs((a&255)-(b&255));
     }
     private static char patchColor(int[] data,int w,int h,double x,double y,double r) {
-        int red=0,orange=0,green=0;
-        for (double[] pos : SAMPLE) {
+        final char[] palette={'R','O','G','B','P','W'};
+        int[] counts=new int[palette.length];
+        for(double[] pos:SAMPLE) {
             char c=pixelClass(pix(data,w,h,x+pos[0]*r,y+pos[1]*r));
-            if(c=='R') red++; else if(c=='O')orange++; else if(c=='G')green++;
+            for(int i=0;i<palette.length;i++)if(c==palette[i]){counts[i]++;break;}
         }
-        int max=Math.max(red,Math.max(orange,green));
-        if(max<7) return ' ';
-        return red==max?'R':orange==max?'O':'G';
+        int best=-1,second=0;
+        for(int i=0;i<counts.length;i++) {
+            if(best<0 || counts[i]>counts[best]) {second=best<0?0:counts[best];best=i;}
+            else if(counts[i]>second)second=counts[i];
+        }
+        if(best<0 || counts[best]<(palette[best]=='W'?5:6) || counts[best]<second+2)return ' ';
+        return palette[best];
     }
-    private static boolean hasCircularEdge(int[] data,int w,int h,double x,double y,double r) {
-        int contrast=0;
+    private static int circularQuality(int[] data,int w,int h,double x,double y,double r) {
+        int contrast=0,strongEdges=0;
         for(int i=0;i<EDGEX.length;i++) {
             int inside=pix(data,w,h,x+EDGEX[i]*r*.58,y+EDGEY[i]*r*.58);
             int outside=pix(data,w,h,x+EDGEX[i]*r*1.20,y+EDGEY[i]*r*1.20);
-            contrast+=difference(inside,outside);
+            int delta=difference(inside,outside);
+            contrast+=delta;
+            if(delta>70)strongEdges++;
         }
-        return contrast>EDGEX.length*105;
+        // A horizontal border in the scenery can create a huge contrast sum,
+        // but a real circular bubble has visible edges in most directions.
+        return strongEdges>=5 && contrast>EDGEX.length*77 ? strongEdges : 0;
+    }
+    private static boolean hasCircularEdge(int[] data,int w,int h,double x,double y,double r) {
+        return circularQuality(data,w,h,x,y,r)>0;
     }
     private static int visiblePixels(int[] data,int w,int h,double cx,double cy,double r,char color,
                                      Ball[][] board,int row,int col) {
@@ -177,23 +219,88 @@ public final class GameSolver {
         return count;
     }
 
-    public Board detect(int[] pixels,int w,int h) {
-        if(pixels==null || w<180 || h<350 || pixels.length!=w*h) return null;
-        double radius=w*cfg.radiusX;
+    private static final class LayoutCandidate {
+        final Configuration layout;
+        final double points;
+        LayoutCandidate(Configuration layout,double points) {this.layout=layout;this.points=points;}
+    }
+    // Template fit is performed only on the top section where bubbles may exist;
+    // green grass and water beneath the board must not be mistaken for bubbles.
+    private static double fit(int[] px,int w,int h,Configuration c,int maxRows) {
+        double radius=w*c.radiusX;
+        int found=0,top=0;
+        double score=0;
+        for(int row=0;row<maxRows;row++) {
+            double y=h*(c.topY+row*c.rowPitch);
+            if(y>h*.52)break;
+            for(int col=0;col<((row&1)==0?9:10);col++) {
+                double x=w*(c.oddX+c.colPitch*col+((row&1)==0?c.colPitch*.5:0));
+                if(x<radius*1.1 || x>w-radius*1.1)continue;
+                if(patchColor(px,w,h,x,y,radius)!=' ') {
+                    int quality=circularQuality(px,w,h,x,y,radius);
+                    if(quality>=5) {
+                        found++;if(row<3)top++;
+                        score+=1.0+(maxRows-row)*.03+(quality-5)*.19;
+                    }
+                }
+            }
+        }
+        // At the beginning of a game most rows are filled. Give the upper rows
+        // greater importance to reject misleading colored scenery.
+        return score+top*.08+(found>=4?1:0);
+    }
+    private static Configuration findLayout(int[] px,int w,int h,Configuration original) {
+        LayoutCandidate winner=null;
+        // Geometry is relative to the screen size and game artwork. Shifted HUDs
+        // move the whole grid even though the launcher stays near the bottom.
+        double[] xPitches={.0805,.0830,.0855};
+        double[] yPitches={.0394,.0410};
+        for(double pitch:xPitches)for(double yp:yPitches)
+            for(double x=.140;x<=.1951;x+=.005)
+                for(double top=.102;top<=.1711;top+=.005) {
+                    Configuration c=copy(original);
+                    c.colPitch=pitch;c.rowPitch=yp;c.oddX=x-pitch*.5;
+                    c.topY=top;
+                    double score=fit(px,w,h,c,7);
+                    if(winner==null || score>winner.points)
+                        winner=new LayoutCandidate(c,score);
+                }
+        if(winner==null || winner.points<5)return null;
+        Configuration c=winner.layout;
+        double best=winner.points;
+        final double seedX=c.oddX+c.colPitch*.5;
+        final double seedTop=c.topY;
+        final double seedColPitch=c.colPitch;
+        final double seedRowPitch=c.rowPitch;
+        // Pixel-level refinement finds a center more precisely than the coarse
+        // scan; this matters for placing a projected ball beside a blocker.
+        for(double pxPitch=seedColPitch-.002;pxPitch<=seedColPitch+.0021;pxPitch+=.001)
+            for(double pyPitch=seedRowPitch-.0014;pyPitch<=seedRowPitch+.00141;pyPitch+=.0007)
+                for(double xx=seedX-.006;xx<=seedX+.0061;xx+=.002)
+                    for(double yy=seedTop-.006;yy<=seedTop+.0061;yy+=.002) {
+                        Configuration ref=copy(original);
+                        ref.colPitch=pxPitch;ref.rowPitch=pyPitch;ref.topY=yy;
+                        ref.oddX=xx-pxPitch*.5;
+                        double score=fit(px,w,h,ref,8);
+                        if(score>best){best=score;c=ref;}
+                    }
+        return c;
+    }
+    private static Board detectAt(int[] pixels,int w,int h,Configuration c) {
+        double radius=w*c.radiusX;
         Ball[][] found=new Ball[ROWS][COLS];
         int count=0, emptyRows=0;
         long hash=0xcbf29ce484222325L;
         for(int row=0;row<ROWS;row++) {
-            double y=h*(cfg.topY+row*cfg.rowPitch);
-            if(y > h*cfg.launchY-radius*4.0)break;
+            double y=h*(c.topY+row*c.rowPitch);
+            if(y>h*c.launchY-radius*4.0)break;
             int rowCount=0;
-            int cols=(row&1)==0?9:10;
-            for(int col=0;col<cols;col++) {
-                double x=w*(cfg.oddX+col*cfg.colPitch+((row&1)==0?cfg.colPitch*.5:0));
+            for(int col=0;col<((row&1)==0?9:10);col++) {
+                double x=w*(c.oddX+c.colPitch*col+((row&1)==0?c.colPitch*.5:0));
                 char color=patchColor(pixels,w,h,x,y,radius);
                 if(color!=' ' && hasCircularEdge(pixels,w,h,x,y,radius)) {
                     int exposed=visiblePixels(pixels,w,h,x,y,radius,color,null,row,col);
-                    if(exposed>=55) {
+                    if(exposed>=Math.max(15,(int)(w*w*.0003))) {
                         found[row][col]=new Ball(row,col,color,x,y,exposed);
                         count++;rowCount++;
                     }
@@ -201,11 +308,9 @@ public final class GameSolver {
                 char cell=found[row][col]==null?'_':found[row][col].color;
                 hash^=(cell+31L*row+col*131L);hash*=0x100000001b3L;
             }
-            if(rowCount==0) emptyRows++; else emptyRows=0;
-            if(emptyRows>=2 && row>=3)break; // Discard background below the board.
+            if(rowCount==0)emptyRows++;else emptyRows=0;
+            if(emptyRows>=2 && row>=3)break;
         }
-        // Recalculate scored visible area using the full detected grid.
-        // Overlay pixels from other bubbles never contribute to a target's score.
         for(int row=0;row<ROWS;row++)for(int col=0;col<COLS;col++) {
             Ball b=found[row][col];
             if(b!=null) {
@@ -213,10 +318,35 @@ public final class GameSolver {
                 found[row][col]=new Ball(row,col,b.color,b.x,b.y,exposed);
             }
         }
-        char shooter=patchColor(pixels,w,h,w*cfg.launchX,h*cfg.launchY,radius);
+        char shooter=patchColor(pixels,w,h,w*c.launchX,h*c.launchY,radius);
         hash^=shooter;hash*=0x100000001b3L;
-        if(count<1 || shooter==' ') return null;
-        return new Board(w,h,cfg,found,shooter,count,hash);
+        return new Board(w,h,c,found,shooter,count,hash);
+    }
+    public Board detect(int[] pixels,int w,int h) {
+        if(pixels==null || w<180 || h<350 || pixels.length!=w*h) {
+            diagnosis="ẢNH KHÔNG HỢP LỆ";return null;
+        }
+        Configuration calibrated=null;
+        SavedLayout previous=savedLayout;
+        if(previous!=null && previous.w==w && previous.h==h) calibrated=previous.apply(cfg);
+        Board result=calibrated==null?null:detectAt(pixels,w,h,calibrated);
+        // Refit if the HUD/grid moved, or if no longer detecting a useful board.
+        // Retain the last good calibration for sparse endgame boards.
+        if(result==null || result.count<3) {
+            Configuration found=findLayout(pixels,w,h,cfg);
+            if(found!=null) {
+                Board candidate=detectAt(pixels,w,h,found);
+                if(result==null || candidate.count>result.count) {
+                    result=candidate;calibrated=found;
+                }
+            }
+        }
+        if(result==null || result.count<1) {diagnosis="KHÔNG THẤY LƯỚI";return null;}
+        if(result.shooter==' ') {diagnosis="KHÔNG THẤY BÓNG BẮN";return null;}
+        if(result.shooter=='W') {diagnosis="BÓNG ĐẶC BIỆT";return null;}
+        diagnosis="OK "+result.count+" BÓNG "+result.shooter;
+        if(calibrated!=null && result.count>=3)savedLayout=new SavedLayout(w,h,calibrated);
+        return result;
     }
 
     private static Contact trace(Board board, List<Ball> all, double angle) {

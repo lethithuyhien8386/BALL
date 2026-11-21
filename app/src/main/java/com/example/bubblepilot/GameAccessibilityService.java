@@ -43,8 +43,8 @@ public final class GameAccessibilityService extends AccessibilityService {
     private TextView status;
     private boolean running=false, screenshotPending=false;
     private final ShotGate shotGate = new ShotGate();
-    private static final long FRAME_CHECK_MS = 125;
-    private static final long ASTRA_MAX_WAIT_MS = 260;
+    private static final long FRAME_CHECK_MS = 115;
+    private static final long ASTRA_MAX_WAIT_MS = 170;
     private long pendingApiSignature=Long.MIN_VALUE,pendingApiSince=0;
     private long remoteSignature=Long.MIN_VALUE,remoteReceivedAt=0;
     private RemoteAdvisor.Point remotePoint=null;
@@ -147,6 +147,7 @@ public final class GameAccessibilityService extends AccessibilityService {
     private void startBot() {
         if(running)return;
         running=true;runId++;
+        GameSolver.resetCalibration();
         shotGate.reset();
         pendingApiSignature=Long.MIN_VALUE;remoteSignature=Long.MIN_VALUE;
         remotePoint=null;
@@ -213,31 +214,46 @@ public final class GameAccessibilityService extends AccessibilityService {
             if(token==runId && running) {updateStatus("NO SCREEN");scheduleFrame(token,800);}
         }
     }
-    private void processBitmap(Bitmap bitmap,int token) {
+    private void processBitmap(Bitmap original,int token) {
+        Bitmap analysis=original;
         try {
-            int w=bitmap.getWidth(),h=bitmap.getHeight();
+            final int screenW=original.getWidth(),screenH=original.getHeight();
+            // Keep per-frame pixel scoring fast on large CloudPhone and phone
+            // screenshots without losing the original gesture coordinates.
+            if(screenW>560) {
+                int w=480,h=Math.max(1,Math.round(screenH*(480f/screenW)));
+                analysis=Bitmap.createScaledBitmap(original,w,h,true);
+                if(analysis!=original)original.recycle();
+            }
+            final Bitmap image=analysis;
+            int w=image.getWidth(),h=image.getHeight();
             int[] rgba=new int[w*h];
-            bitmap.getPixels(rgba,0,w,0,0,w,h);
+            image.getPixels(rgba,0,w,0,0,w,h);
             GameSolver planner=solver();
             GameSolver.Board board=planner.detect(rgba,w,h);
             GameSolver.Shot move=planner.bestShot(board);
+            final String report=planner.diagnosis();
             main.post(()->{
                 screenshotPending=false;
-                if(token==runId && running)onFrame(token,bitmap,board,move);
-                else bitmap.recycle();
+                if(token==runId && running)
+                    onFrame(token,image,board,move,report,
+                            screenW/(float)w,screenH/(float)h);
+                else image.recycle();
             });
         } catch(Exception error) {
+            if(analysis!=null && !analysis.isRecycled())analysis.recycle();
             main.post(()->{
-                bitmap.recycle();screenshotPending=false;
+                screenshotPending=false;
                 if(token==runId && running) {updateStatus("VISION ERR");scheduleFrame(token,600);}
             });
         }
     }
-    private void onFrame(int token,Bitmap image,GameSolver.Board board,GameSolver.Shot shot) {
+    private void onFrame(int token,Bitmap image,GameSolver.Board board,GameSolver.Shot shot,
+                         String report,float scaleX,float scaleY) {
         if(board==null || shot==null) {
             image.recycle();
-            shotGate.observedNoBoard();
-            updateStatus("CHỜ BÓNG");
+            if(board==null)shotGate.observedNoBoard();
+            updateStatus(board==null?report:"KHÔNG CÓ GÓC");
             scheduleFrame(token,FRAME_CHECK_MS);
             return;
         }
@@ -246,6 +262,7 @@ public final class GameAccessibilityService extends AccessibilityService {
         // followed by two identical valid frames. No timer-only duplicate shots.
         if(!shotGate.canShoot(board.signature,now)) {
             image.recycle();
+            updateStatus("CHỜ LƯỢT");
             scheduleFrame(token,FRAME_CHECK_MS);
             return;
         }
@@ -284,11 +301,12 @@ public final class GameAccessibilityService extends AccessibilityService {
             }
         }
         image.recycle();
-        performTap(token,shot);
+        performTap(token,shot,scaleX,scaleY);
     }
-    private void performTap(int token,GameSolver.Shot shot) {
+    private void performTap(int token,GameSolver.Shot shot,float scaleX,float scaleY) {
         if(!running || token!=runId)return;
-        Path path=new Path();path.moveTo(shot.tapX,shot.tapY);
+        Path path=new Path();
+        path.moveTo(Math.round(shot.tapX*scaleX),Math.round(shot.tapY*scaleY));
         GestureDescription.StrokeDescription stroke=new GestureDescription.StrokeDescription(path,0,55);
         GestureDescription gesture=new GestureDescription.Builder().addStroke(stroke).build();
         try {

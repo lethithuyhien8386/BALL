@@ -1,62 +1,59 @@
-# BubblePilot Astra — Android + GitHub Actions
+# BubblePilot Astra v0.4.0 — Android/GitHub source
 
-> **Version 0.3.0: install-compatibility fix**. Supports Android 8.0+ (API 26+) by adding MediaProjection screen capture for Android 8–10. This code is not compiled in the current environment; GitHub Actions compiles, validates the signed APK and runs emulator installation checks for Android 9 and 11. Real gameplay still needs a phone test.
+## Why the previous build showed “CHỜ BÓNG”
 
-## 1. Build APK directly on GitHub (no Android Studio required)
+The earlier image classifier only recognized red, orange and green. The second game screenshot contains purple, cyan/blue and a white special bubble, and the entire board begins lower on the screen than in the first image. The detector therefore returned an empty result and the bot did not tap. **v0.4 fixes the recognizer and automatically fits the grid to the screenshot.** This is a source-code release, not a prebuilt APK. A small (~34 KB) Java APK is not inherently invalid: the remote Astra model is not bundled in the APK.
 
-The ZIP was built so that `.github/workflows/build-apk.yml` sits in the **root** of a GitHub repository, alongside `app/`, `build.gradle`, and `settings.gradle`.
+## Build on GitHub
 
-1. Create a GitHub repository, preferably **Private**, and choose the default branch **main**.
-2. **Extract** the ZIP and upload **all files and folders inside**, including hidden `.github/workflows/build-apk.yml`, into the repository root. Do **not** upload only the ZIP itself. For an upload through a terminal: `git add -A`, `git commit`, and `git push` are sufficient once your repository is configured.
-3. Open **Actions** > **Build and verify Bubble Pilot Astra APK** > **Run workflow**. A push to `main` also starts the workflow automatically.
-4. After a successful run, open the build and find **Artifacts** > **BubblePilot-Astra-APK-Android8plus**.
-5. Download and extract the GitHub artifact ZIP to obtain `app-debug.apk`. Transfer it to Android and install it (allow installation from that source if Android prompts you).
+1. **Extract** the ZIP and upload all its contents to the root of your GitHub repository, including the hidden `.github` directory. Replace older source files; do not leave two workflows building different versions.
+2. Open **Actions > Build and verify Bubble Pilot Astra v0.4 APK > Run workflow**.
+3. Wait for the green `build` job **and** both green `emulator-install-check` jobs (Android 9/API 28 and Android 11/API 30), then the green `publish-verified` job.
+4. Download the **BubblePilot-Astra-v0.4-APK-InstallChecked** artifact. Extract the artifact ZIP and install **app-debug.apk**. The artifact ZIP itself is not an APK.
+5. If the emulator job has an infrastructure/KVM problem, the separately named `BubblePilot-Astra-Candidate` artifact may exist, but it is **NOT** marked install-checked. Inspect the logs before treating it as verified.
 
-GitHub downloads Gradle **8.9**, Android SDK **35** and JDK **17**. The workflow uses `android-actions/setup-android@v4` to avoid the deprecated Android SDK `tools` package error seen with `@v3`. If you already uploaded an older ZIP to GitHub, replace `.github/workflows/build-apk.yml` with this updated file and commit before rerunning. The workflow tests the solver and state machine, compiles the debug APK, verifies the APK ZIP structure, Android manifest, DEX code, alignment and signing, then performs emulator installation checks on Android 9 (API 28) and Android 11 (API 30). The APK and a SHA-256 report are published as artifacts even if a later emulator job has issues. **No private API key is needed in GitHub Actions.** Enter the key only inside the installed app.
+Build uses JDK 17, Gradle 8.9, AGP 8.7.3 and compile SDK 35. The debug APK is signed by Gradle and structurally checked for its DEX, manifest, signature, and alignment. The workflow then runs Android emulator install/start tests. These CI tests have **not been executed in the current environment** because it has no Android SDK and no external network access.
 
-Build can also be done in Android Studio using JDK 17 / Gradle 8.9 / SDK 35. There is no bundled Gradle-wrapper JAR; the GitHub workflow uses a known installed Gradle version instead.
+## Run on Android 8.0+
 
-## 2. Start the bot
+1. Uninstall the older BubblePilot if Android refuses an update due to a different debug signing key. This clears app settings/API key.
+2. Open Bubble Pilot v0.4.0; grant **CLICK** (Android Accessibility Service) and **FLOAT** (Display over other apps). On Android 8–10 also grant **CAPTURE** (MediaProjection) using the button and system prompt.
+3. Under settings, the model name is **gpt-6-astra**, endpoint is **https://api.xingchiapi.com/v1**, and key is stored encrypted on the phone (Android Keystore). Enter only a key you trust with that third-party provider. You can run local pixel detection without entering a key.
+4. Tap **LƯU CÀI ĐẶT**, then **START — HIỆN THANH NỔI**, switch to the game, press **▶** to start. Move the bar by dragging **⠿**. Press **■** to stop or **×** to close.
+5. When recognition succeeds, the app chooses a trajectory and sends an Android Accessibility tap. Afterward it monitors for a changed board and two stable frames before tapping again.
 
-- Open the installed app. Enable **CLICK (Accessibility)** and **FLOAT (Draw over other apps)** from the settings buttons. **On Android 8–10**, also grant **CAPTURE** via the system screen-sharing prompt (required by MediaProjection). This is a separate system permission; Android 11+ does not need it.
-- The app's Settings page defaults to endpoint `https://api.xingchiapi.com/v1`, model **`gpt-6-astra`**, and encrypted API key storage using Android Keystore AES-GCM.
-- Press **LƯU CÀI ĐẶT**. Press **START — HIỆN THANH NỔI**.
-- Open the bubble-shooter game and press **▶** on the floating bar. Drag the bar using **⠿**; press **■** to pause or **×** to close. The app doesn't require root.
-- Keep the floating bar outside the grid area; otherwise it can cover balls in screenshots.
+### Floating-bar diagnostics
 
-## 3. Continuous game logic
+- `KHÔNG THẤY LƯỚI`: grid could not be recognized; check screenshot, game orientation and whether the game is visible.
+- `KHÔNG THẤY BÓNG BẮN`: board visible, projectile not recognized; check launcher position.
+- `KHÔNG CÓ GÓC`: no valid simulated path found; may indicate an incompatible game layout.
+- `CHỜ LƯỢT`: board state has not progressed sufficiently or a new frame has not stabilized.
+- `POP N` / `AIM XX`: a simulated tap was successfully handed to Android's gesture dispatcher. This does not prove the game accepted it.
+- `TAP ERR` / `TAP FAIL`: Accessibility rejected/cancelled the tap; check service permissions and game restrictions.
+- `SCREEN [code]` / `CAPTURE OFF`: screenshot permission/system capture issue.
 
-- Take screenshots through Android Accessibility screenshot API on Android 11+, or a user-approved MediaProjection foreground service on Android 8–10. Extract RGB pixels into memory; detect red, orange and green bubbles on a staggered grid, and compute the count of visible-color pixels per bubble while excluding overlaps with already detected bubbles.
-- Search **311** half-degree candidate shots plus 11 fine refinements. Trace the projectile against the **first** bubble it hits, accounting for side-wall rebounds. Hidden balls behind blockers aren't treated as direct collision targets. Estimate groups removed (3+) and unsupported bubbles that drop; maximize predicted score with an exposed-pixel weight.
-- Send tap through Accessibility gestures. Observe subsequent frames continuously and ensure **two matching valid frames** after seeing a change from the previous shot before shooting the next ball. This prioritizes no duplicate shots over maximum possible tapping rate. Frame recheck target is ~125ms but system screenshot throttling, animations, and hardware add latency.
-- The **Astra** Responses API is only consulted if the local best shot scores poorly and a key is configured. Wait budget ~260ms, then fall back to the computed local shot; API requests can continue in the background, but only the current screenshot's result is eligible. An Astra suggestion is locally simulated and accepted **only if it scores higher**. Cloud replies may be slower than this budget and hence unused.
-- The code sends `"model":"gpt-6-astra"`, `"store":false`, plus an image via the `/responses` endpoint. `astra-model.example.json` records the client-side context/output limits and variant names from the supplied configuration. These are not automatically transmitted to an API; your provider must actually support the model and route.
+## What was fixed in v0.4
 
-## 4. Important limitations
+- **Pixel classification** recognizes `R` red, `O` orange, `G` green, `B` cyan/blue, `P` purple, `W` neutral/white special objects (obstacles, not normal color matches). The white type is recognized as a blocker; its actual in-game effect still needs testing.
+- **Automatic geometry fitting** scans plausible first-row coordinates, horizontal/vertical grid spacing and center placement. It rejects straight scenery edges masquerading as circles. Calibrations are reused after a valid frame for faster continuous processing, and reset on Start.
+- **Visible-pixel scoring and occlusion** exclude the circle area covered by neighboring balls. The solver traces candidate paths up to the first impact (including wall rebounds), estimates matching 3+ clusters and falling unsupported bubbles, and refines the best angle. It does not simply click a raw color on the screenshot.
+- **High-resolution scaling** analyzes images over 560 pixels wide at a smaller resolution, and converts tap coordinates back to the real device screen size.
+- **Continuous play** uses an observable board/shooter signature with a 2-frame stability gate after each shot; this avoids repeated taps at an unchanged board. Screenshot cadence is ~115ms plus processing and game animation. Astra can be requested for uncertain local decisions, with a 170ms maximum wait before the local fallback.
+- **Clearer statuses** replace the ambiguous `CHỜ BÓNG` text so detection/gesture failure causes can be distinguished.
 
-- The detector is **calibrated to the submitted 422 × 757 screenshot**. It assumes 3 bubble colors, simple match-3 rules, tap-to-aim, and a fixed staggered grid. Different layouts, aspect ratios, obstructed views, special bubbles, animation and post-shot rules may invalidate a shot.
-- Continuous monitoring is built in, but a new ball must be detected and the screenshot must become stable. It **cannot be guaranteed instantaneous** on all phones and games. If the board does not visibly transition, the anti-double-tap state machine may wait rather than repeatedly tap.
-- `gpt-6-astra` and the stated limits/variants are **user-supplied provider identifiers**: the third-party endpoint has not been verified. Passing `"store":false` requests non-storage, but does not guarantee a third party's retention policy.
-- Accessibility can read what's on screen and tap on behalf of the user. Enable it only when desired. Some games restrict overlay, screenshot or synthetic taps.
-- APK from CI is a **debug build**, automatically signed by Gradle, not a store release. It may be very small because this app uses no external UI libraries. **Size alone does not establish APK validity**; use `build-report.txt` and the emulator install jobs. GitHub distributes a ZIP artifact containing the actual `app-debug.apk`; do not rename that ZIP to `.apk`. If you previously installed another CI-signed BubblePilot APK, a different debug signing certificate can require uninstalling the older copy first (this clears its settings). No API key or secret is hardcoded in the ZIP.
+## Tests completed on the supplied screenshots
 
-## Layout
+`bash tests/test.sh` — passes on JDK 17:
 
-- `.github/workflows/build-apk.yml` — one-click GitHub Actions build + artifact
-- `app/src/main/java/com/example/bubblepilot/MainActivity.java` — permissions, model, endpoint and encrypted key UI
-- `GameAccessibilityService.java` — continuous screenshots, floating UI, gestures, Astra fallback
-- `GameSolver.java` — pixel classification and score-maximizing trajectory planner
-- `ShotGate.java` — no-repeat, new-ball detection state machine
-- `LegacyProjectionService.java` — Android 8–10 screen capture with OS consent
-- `scripts/verify-apk.sh` — fail CI if the APK is corrupted, unsigned, or missing DEX
-- `RemoteAdvisor.java` — HTTPS `/responses` model call
-- `SecretStore.java` — Android Keystore storage
-- `tests/` — local Java tests: `bash tests/test.sh`
-- `astra-model.example.json` — sanitized model-provider example, do not put a real key in Git
+- Original 422×757 image: detects **76 balls**, active projectile **green**, and produces a simulated shot.
+- New 441×791 screenshot (with floating bar): detects **64 balls**, active projectile **purple**, at least one **blue** bubble and the **white special** bubble, and produces a simulated tap near `(281,424)`.
+- The new screenshot does not misidentify the background under the bubble stack as another row of bubbles.
+- 2× resized screenshot test checks the detector remains scale-aware.
+- Continuous-shot state machine test ensures 2 stable frames and prevents duplicate taps on the same unchanged board.
+- On a desktop JDK, the new screenshot took ~80–150ms to calibrate and produce a shot the first time; later same-layout frames took ~5ms for vision and ~2ms for trajectory choice. **These are not Android performance measurements**.
 
-## Troubleshoot installation
+## Important limitations
 
-1. **Always extract** the downloaded GitHub artifact ZIP; install its `app-debug.apk`, not the ZIP itself. The APK's SHA256 must match `build-report.txt`.
-2. Confirm both emulator install checks are green, then check your Android version: minimum Android 8.0 (API 26). The fallback CAPTURE prompt is only for Android 8–10.
-3. If you get "problem parsing package", connect via USB debugging and run `adb install -r app-debug.apk` to get the actual Android installer error code. For an already installed app signed with a different debug key, uninstall the previous version and install again.
-4. This workflow proves the APK package can be installed on Android 9 and 11 **when both emulator checks succeed**. It does not prove the game can be controlled or that Astra's private API is available.
+This is **not** a guarantee of fastest or perfect play. Actual game mechanics (special power-ups, hidden physics, shooting gesture, animation, score multipliers), phone performance, screen overlays and in-game anti-automation rules can affect accuracy. Tests on static screenshots cannot verify that the game responds to Accessibility taps. If the bar says `AIM` or `POP` but the game ignores taps, the game's interaction mode/gesture likely needs further calibration on an actual device.
+
+The third-party Astra API endpoint/model's availability was supplied by the user and has not been independently verified. Setting `store:false` requests non-storage but cannot guarantee the provider's data policy. Never put a real API key into your public GitHub repository.

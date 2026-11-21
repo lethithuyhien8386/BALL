@@ -47,7 +47,7 @@ public final class MainActivity extends Activity {
 
         TextView heading=text("BUBBLE PILOT",25,fg,true);
         content.addView(heading);
-        content.addView(text("Điều khiển bóng theo pixel • Không cần root",14,muted,false));
+        content.addView(text("v0.4.0 • Tự nhận diện tím / xanh dương • Không cần root",14,muted,false));
         space(20);
         cardHeader("1. Cấp quyền");
         permissionStatus=text("Đang kiểm tra...",14,fg,false);
@@ -95,7 +95,7 @@ public final class MainActivity extends Activity {
         });
         space(20);
         cardHeader("3. Hiệu chỉnh cho game trong ảnh");
-        content.addView(text("Giữ mặc định nếu game hiển thị như ảnh mẫu. Bot quét liên tục và đợi bàn ổn định 2 khung hình sau mỗi phát bắn để tránh bắn trùng.",13,muted,false));
+        content.addView(text("Tự tìm vị trí lưới bóng khi thanh game hoặc HUD dịch chuyển. Hỗ trợ đỏ, cam, xanh lá, xanh dương, tím và bóng đặc biệt. Đợi 2 khung hình ổn định để tránh bắn lặp.",13,muted,false));
         space(5);
         topY=field("Tâm hàng bóng đầu (% chiều cao)",store.getText("top_pct","11.36"),false);
         launchY=field("Tâm bóng ở nòng bắn (% chiều cao)",store.getText("launch_pct","75.86"),false);
